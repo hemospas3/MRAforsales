@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  نظام CRM لسجل بيانات الموظفين / العملاء — بُني لـ محمد
+  © 2026 محمد — جميع الحقوق محفوظة لهذا الملف وتصميمه.
+
+  ============================================================
+  إعداد المزامنة + تسجيل الدخول (لمرة وحدة فقط):
+  ============================================================
+  1) روح إلى https://console.firebase.google.com وسوّي مشروع جديد (مجاني)
+     (أو استخدم نفس مشروعك القديم لو عندك وحد).
+
+  2) Build → Realtime Database → Create Database → Start in test mode.
+
+  3) Build → Authentication → Get started → فعّل مزود
+     "Email/Password" (فقط - لا تفعّل غيره).
+
+  4) ⚠️ مهم جدًا للأمان الحقيقي: روح لـ Realtime Database → Rules
+     واحذف كل شي وحط بدله هذا بالضبط:
+
+     {
+       "rules": {
+         "users": {
+           ".read": "auth != null",
+           "$uid": {
+             ".write": "(auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin') || (!root.child('users').exists() && auth.uid === $uid)"
+           }
+         },
+         "records": {
+           ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false",
+           ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false"
+         }
+       }
+     }
+
+     هذا يمنع أي شخص من فتح الموقع أو رؤية البيانات إلا إذا كان
+     حسابه موجود بقائمة المستخدمين ومو معطّل. بدون هذي القواعد،
+     أي حد يعرف رابط مشروعك يقدر يوصل للبيانات مباشرة.
+
+  5) من ⚙️ Project settings → Your apps → Web (</>) انسخ كائن
+     الإعداد (firebaseConfig) والصقه مكان "PASTE_..." بالأسفل.
+
+  6) أنشئ حسابك أنت (المسؤول) أولاً من Authentication → Users →
+     Add user (بريدك + كلمة سر). افتح الموقع وسجّل دخول بيها —
+     أول شخص يدخل والقائمة فاضية ينصّب تلقائيًا "مسؤول".
+
+  7) من داخل الموقع (بعد ما تسجّل دخول كمسؤول) تقدر تضيف حسابات
+     لباقي الفريق من "👥 إدارة المستخدمين" — محد غيرك يقدر يضيف
+     حسابات أو يحذفها أو يعطّلها.
+  ============================================================
+-->
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>نظام CRM — سجل بيانات الموظفين / العملاء</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<style>
+  :root {
+    --navy: #1F4E78; --gold: #C9A227; --bg: #F7F5F0; --text: #2B2B2B;
+    --border: #DCD7C8; --card-border: #EAE6D9;
+    --stage-new-bg:#EDEBE3; --stage-new-fg:#6B6B6B; --stage-new-bd:#D8D4C6;
+    --stage-contacted-bg:#E3EEF7; --stage-contacted-fg:#1F4E78; --stage-contacted-bd:#B7D2E8;
+    --stage-interested-bg:#FFF6DC; --stage-interested-fg:#8A6D00; --stage-interested-bd:#EBD98A;
+    --stage-client-bg:#E7F3E8; --stage-client-fg:#2E7D32; --stage-client-bd:#BFE0C2;
+    --stage-rejected-bg:#FDECEA; --stage-rejected-fg:#B3261E; --stage-rejected-bd:#F3B9B3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Tajawal', Arial, sans-serif; background: var(--bg); color: var(--text); }
+  input::placeholder, textarea::placeholder { color: #B0AA98; }
+  .hidden { display: none !important; }
+
+  /* ---- Login screen ---- */
+  #loginScreen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--navy); padding: 20px;
+  }
+  .login-box { background: #fff; border-radius: 14px; padding: 32px 28px; width: 100%; max-width: 340px; box-shadow: 0 12px 34px rgba(0,0,0,0.25); text-align: center; }
+  .login-box .emoji { font-size: 34px; }
+  .login-box h2 { color: var(--navy); font-size: 18px; margin: 8px 0 4px; }
+  .login-box p.sub { color: #8B8577; font-size: 12.5px; margin: 0 0 18px; }
+  .login-field { text-align: right; margin-bottom: 12px; }
+  .login-field label { font-size: 12px; color: #6B6B6B; display: block; margin-bottom: 5px; }
+  .login-field input {
+    width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--border);
+    font-size: 14px; font-family: 'Tajawal', sans-serif; outline: none; background: #FCFBF8;
+  }
+  .login-submit {
+    width: 100%; background: var(--gold); color: var(--navy); border: none; border-radius: 8px;
+    padding: 12px 0; font-weight: 900; font-size: 14.5px; cursor: pointer; font-family: 'Tajawal', sans-serif;
+    margin-top: 6px;
+  }
+  .login-error { color: #B3261E; font-size: 12.5px; margin-top: 10px; min-height: 16px; }
+  .login-footer { font-size: 11px; color: #B0AA98; margin-top: 16px; }
+
+  /* ---- App ---- */
+  .header-bar { background: var(--navy); padding: 26px 20px 22px; }
+  .header-inner { max-width: 1140px; margin: 0 auto; }
+  .header-top-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+  .header-title-row { display: flex; align-items: center; gap: 10px; }
+  .header-title { color: #fff; font-size: 21px; font-weight: 900; margin: 0; }
+  .header-subtitle { color: var(--gold); font-size: 12.5px; margin: 6px 0 0; font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sync-dot { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+  .sync-dot .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .header-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill-btn {
+    display: flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px;
+    font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: 'Tajawal', sans-serif;
+    border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.12); color: #fff;
+  }
+  .pill-btn.gold { background: var(--gold); color: var(--navy); border-color: var(--gold); }
+  .who-chip { color: #fff; font-size: 12px; opacity: 0.85; align-self: center; }
+
+  .container { max-width: 1140px; margin: 0 auto; padding: 20px 16px 40px; }
+  .view-only-notice, .setup-notice {
+    display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 10px 14px;
+    font-size: 13px; margin-bottom: 14px;
+  }
+  .view-only-notice { background: #FFF6DC; border: 1px solid #EBD98A; color: #8A6D00; }
+  .setup-notice { background: #FDECEA; border: 1px solid #F3B9B3; color: #B3261E; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(31,78,120,0.08);
+    border: 1px solid var(--card-border); margin-bottom: 18px;
+  }
+  .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-weight: 700; font-size: 15px; color: var(--navy); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field label { font-size: 12px; font-weight: 500; color: #6B6B6B; }
+  input[type=text], input[type=password], input[type=email], input[type=search], input[type=date], textarea, select.plain {
+    padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    font-size: 14px; font-family: 'Tajawal', sans-serif; outline: none; background: #FCFBF8; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  .add-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--gold);
+    color: var(--navy); border: none; border-radius: 8px; padding: 11px 20px; font-weight: 700;
+    font-size: 14px; cursor: pointer; white-space: nowrap; font-family: 'Tajawal', sans-serif;
+  }
+  .dup-alert {
+    margin-top: 14px; display: flex; gap: 10px; background: #FDECEA; border: 1px solid #F3B9B3;
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .dup-title { color: #B3261E; font-weight: 700; font-size: 14px; }
+  .dup-detail { color: #8A3E38; font-size: 13px; margin-top: 3px; }
+
+  .filter-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .search-wrap, .select-wrap {
+    display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px;
+  }
+  .search-wrap { flex: 1 1 200px; }
+  .search-wrap input, .select-wrap select { border: none; outline: none; font-size: 14px; font-family: 'Tajawal', sans-serif; background: transparent; width: 100%; cursor: pointer; }
+  .search-wrap input { cursor: text; }
+  .export-btn, .pdf-btn, .reminder-toggle-btn {
+    display: flex; align-items: center; gap: 6px; border-radius: 8px; padding: 10px 16px;
+    font-weight: 700; font-size: 13.5px; cursor: pointer; font-family: 'Tajawal', sans-serif; border: none; white-space: nowrap;
+  }
+  .export-btn { background: var(--navy); color: #fff; }
+  .pdf-btn { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
+  .reminder-toggle-btn { background: #fff; color: #B3261E; border: 1px solid #F3B9B3; }
+  .reminder-toggle-btn.active { background: #B3261E; color: #fff; border-color: #B3261E; }
+
+  .table-card { background: #fff; border-radius: 12px; border: 1px solid var(--card-border); overflow: hidden auto; box-shadow: 0 1px 3px rgba(31,78,120,0.08); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 820px; }
+  th { background: var(--navy); color: #fff; padding: 12px 14px; text-align: center; font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+  td { padding: 9px 14px; text-align: center; border-bottom: 1px solid #F0EDE3; }
+  tbody tr:nth-child(even) { background: #FBF9F4; }
+
+  .stage-select {
+    border-radius: 20px; padding: 5px 10px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    font-family: 'Tajawal', sans-serif; border: 1px solid; appearance: none; text-align: center; text-align-last: center;
+  }
+  .stage-جديد { background: var(--stage-new-bg); color: var(--stage-new-fg); border-color: var(--stage-new-bd); }
+  .stage-تم_التواصل { background: var(--stage-contacted-bg); color: var(--stage-contacted-fg); border-color: var(--stage-contacted-bd); }
+  .stage-مهتم { background: var(--stage-interested-bg); color: var(--stage-interested-fg); border-color: var(--stage-interested-bd); }
+  .stage-عميل_فعلي { background: var(--stage-client-bg); color: var(--stage-client-fg); border-color: var(--stage-client-bd); }
+  .stage-مرفوض { background: var(--stage-rejected-bg); color: var(--stage-rejected-fg); border-color: var(--stage-rejected-bd); }
+
+  .reminder-chip { font-size: 12px; padding: 4px 9px; border-radius: 14px; font-weight: 600; white-space: nowrap; }
+  .rem-none { color: #B0AA98; }
+  .rem-future { background: #EDEBE3; color: #6B6B6B; }
+  .rem-today { background: #FFF6DC; color: #8A6D00; }
+  .rem-overdue { background: #FDECEA; color: #B3261E; }
+
+  .icon-btn { background: transparent; border: none; color: var(--navy); cursor: pointer; padding: 4px; margin: 0 2px; font-size: 15px; }
+  .delete-btn { background: transparent; border: none; color: #B3B3B3; cursor: pointer; padding: 4px; font-size: 15px; }
+  .empty-state { padding: 30px; text-align: center; color: #9A9A9A; font-size: 14px; }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.2); z-index: 60; max-width: 320px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(31,78,120,0.35); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  .modal-box { background: #fff; border-radius: 12px; padding: 24px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto; }
+  .modal-box.wide { width: 100%; max-width: 600px; }
+  .modal-header { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--navy); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .modal-cancel, .modal-confirm { flex: 1; border: none; border-radius: 8px; padding: 10px 0; font-weight: 600; font-size: 13px; cursor: pointer; font-family: 'Tajawal', sans-serif; }
+  .modal-cancel { background: #EAE6D9; }
+  .modal-confirm { background: var(--navy); color: #fff; }
+
+  .detail-section { margin-top: 18px; }
+  .detail-section-title { font-weight: 700; font-size: 13.5px; color: var(--navy); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .detail-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .notes-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .note-item { background: #FBF9F4; border: 1px solid #F0EDE3; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .note-meta { font-size: 11px; color: #9A9A9A; margin-top: 4px; }
+  .reminder-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  .small-btn { background: var(--navy); color: #fff; border: none; border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'Tajawal', sans-serif; white-space: nowrap; }
+  .small-btn.secondary { background: #EAE6D9; color: #4A4A4A; }
+  .small-btn.danger { background: #B3261E; color: #fff; }
+
+  /* ---- Users admin panel ---- */
+  .user-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #F0EDE3; flex-wrap: wrap; }
+  .user-row:last-child { border-bottom: none; }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--navy); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .user-info { flex: 1; min-width: 120px; }
+  .user-name-line { font-weight: 700; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+  .user-email-line { font-size: 11.5px; color: #9A9A9A; }
+  .role-badge { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--gold); color: var(--navy); font-weight: 700; }
+  .disabled-badge { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: #FDECEA; color: #B3261E; font-weight: 700; }
+  .user-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tiny-btn { background: #EAE6D9; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; font-family: 'Tajawal', sans-serif; }
+  .tiny-btn.danger { background: #FDECEA; color: #B3261E; }
+  .tiny-btn.warn { background: #FFF6DC; color: #8A6D00; }
+
+  footer.app-footer { text-align: center; font-size: 11.5px; color: #A9A398; padding: 18px 0 6px; }
+
+  .print-only { display: none; }
+  @media print {
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    body { background: #fff !important; }
+    .table-card { box-shadow: none !important; border: 1px solid #999 !important; }
+    th, td { border: 1px solid #999 !important; color: #000 !important; }
+    th { background: var(--navy) !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN SCREEN ============ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="emoji">🔐</div>
+    <h2>تسجيل الدخول</h2>
+    <p class="sub">نظام CRM — سجل بيانات الموظفين / العملاء</p>
+    <div class="login-field"><label>البريد الإلكتروني</label><input type="email" id="loginEmail" placeholder="name@example.com" /></div>
+    <div class="login-field"><label>كلمة السر</label><input type="password" id="loginPassword" placeholder="••••••••" /></div>
+    <button class="login-submit" id="loginBtn">دخول</button>
+    <div class="login-error" id="loginError"></div>
+    <div class="login-footer">الوصول بالدعوة فقط — تواصل مع المسؤول للحصول على حساب</div>
+  </div>
+</div>
+
+<!-- ============ MAIN APP (hidden until authenticated) ============ -->
+<div id="appRoot" class="hidden">
+
+<div class="print-only" style="padding:0 20px; border-bottom:2px solid #1F4E78; margin-bottom:10px;">
+  <div style="font-size:18px; font-weight:900; color:#1F4E78;">سجل بيانات الموظفين / العملاء — قسم المبيعات</div>
+  <div id="printMeta" style="font-size:12px; color:#4A4A4A; margin:4px 0 10px;"></div>
+</div>
+
+<div class="header-bar no-print">
+  <div class="header-inner">
+    <div class="header-top-row">
+      <div class="header-title-row">
+        <span>🏷️</span>
+        <h1 class="header-title">نظام CRM — سجل الموظفين / العملاء</h1>
+      </div>
+      <div class="header-btns">
+        <span class="who-chip" id="whoChip"></span>
+        <button id="reminderBadgeBtn" class="pill-btn">🔔 <span id="reminderCount">0</span></button>
+        <button id="usersBtn" class="pill-btn hidden">👥 المستخدمين</button>
+        <button id="logoutBtn" class="pill-btn">🚪 خروج</button>
+      </div>
+    </div>
+    <p class="header-subtitle">
+      <span id="headerSubtitle">قسم المبيعات — 0 سجل</span>
+      <span class="sync-dot" id="syncDot"><span class="dot" style="background:#B0AA98;"></span> جارٍ الاتصال...</span>
+    </p>
+  </div>
+</div>
+
+<div class="container">
+  <div id="setupNotice" class="setup-notice hidden">
+    ⚠️ لازم تكمل إعداد Firebase وقواعد الأمان (شوف التعليمات بأعلى كود الملف) حتى تشتغل المزامنة.
+  </div>
+  <div id="viewOnlyNotice" class="view-only-notice no-print hidden">
+    ℹ️ حسابك بصلاحية "عضو" — تقدر تضيف بيجات وتغيّر المرحلة وتضيف ملاحظات وتذكيرات، لكن تعديل الاسم/الرقم/العنوان والحذف وإدارة المستخدمين للمسؤول فقط.
+  </div>
+
+  <div class="card no-print">
+    <div class="card-header">➕ إضافة بيج جديد</div>
+    <div class="form-grid">
+      <div class="field"><label>اسم البيج</label><input type="text" id="inName" placeholder="مثال: أزياء الأمل" /></div>
+      <div class="field"><label>رقم الهاتف</label><input type="text" id="inPhone" placeholder="مثال: 7712345678" /></div>
+      <div class="field"><label>العنوان / المنطقة</label><input type="text" id="inAddress" placeholder="مثال: المنصور" /></div>
+      <button class="add-btn" id="addBtn">➕ إضافة</button>
+    </div>
+    <div class="dup-alert hidden" id="dupAlert">
+      <span>⚠️</span>
+      <div><div class="dup-title">هذا البيج مضاف مسبقًا</div><div class="dup-detail" id="dupDetail"></div></div>
+    </div>
+  </div>
+
+  <div class="filter-bar no-print">
+    <div class="search-wrap">🔍 <input type="search" id="searchInput" placeholder="بحث بالاسم أو رقم الهاتف..." /></div>
+    <div class="select-wrap">📍 <select id="regionFilter"></select></div>
+    <div class="select-wrap">🏷️ <select id="stageFilter">
+      <option value="الكل">كل المراحل</option>
+      <option value="جديد">جديد</option>
+      <option value="تم التواصل">تم التواصل</option>
+      <option value="مهتم">مهتم</option>
+      <option value="عميل فعلي">عميل فعلي</option>
+      <option value="مرفوض">مرفوض</option>
+    </select></div>
+    <button class="reminder-toggle-btn" id="reminderFilterBtn">🔔 تذكيراتي اليوم</button>
+    <button class="export-btn" id="exportExcelBtn">⬇️ تصدير Excel</button>
+    <button class="pdf-btn" id="exportPdfBtn">🖨️ تصدير PDF</button>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>البيج</th>
+          <th>📞 الهاتف</th>
+          <th>📍 العنوان</th>
+          <th>المرحلة</th>
+          <th>المتابعة القادمة</th>
+          <th class="no-print" style="width:80px;"></th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="app-footer">© 2026 محمد — جميع الحقوق محفوظة لهذا النظام وتصميمه.</footer>
+</div>
+</div>
+<!-- ============ END MAIN APP ============ -->
+
+<!-- Delete record confirm modal -->
+<div class="modal-overlay hidden" id="deleteModal">
+  <div class="modal-box">
+    <div class="modal-header" style="color:#B3261E;">⚠️ تأكيد الحذف</div>
+    <div style="font-size:13.5px; color:#4A4A4A; margin-top:10px;">هل تريد حذف <b id="deleteTargetName"></b> نهائيًا من السجل؟</div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="deleteCancel">إلغاء</button>
+      <button class="modal-confirm" id="deleteConfirm" style="background:#B3261E;">حذف</button>
+    </div>
+  </div>
+</div>
+
+<!-- Detail / CRM modal -->
+<div class="modal-overlay hidden" id="detailModal">
+  <div class="modal-box wide">
+    <div class="modal-header">📋 <span id="detailName">—</span></div>
+    <div class="detail-grid" style="margin-top:14px;">
+      <div class="field"><label>اسم البيج</label><input type="text" id="detailNameInput" /></div>
+      <div class="field"><label>رقم الهاتف</label><input type="text" id="detailPhoneInput" /></div>
+      <div class="field"><label>العنوان / المنطقة</label><input type="text" id="detailAddressInput" /></div>
+    </div>
+    <div style="margin-top:10px; display:flex; gap:8px;">
+      <button class="small-btn no-print" id="detailSaveContact">💾 حفظ التعديل</button>
+      <span id="detailContactHint" style="font-size:12px; color:#9A9A9A; align-self:center;"></span>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">🏷️ المرحلة</div>
+      <select class="stage-select" id="detailStageSelect" style="width:100%; padding:10px;">
+        <option value="جديد">جديد</option>
+        <option value="تم التواصل">تم التواصل</option>
+        <option value="مهتم">مهتم</option>
+        <option value="عميل فعلي">عميل فعلي</option>
+        <option value="مرفوض">مرفوض</option>
+      </select>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">📝 سجل الملاحظات والمكالمات</div>
+      <div class="notes-list" id="notesList"></div>
+      <textarea id="newNoteText" placeholder="اكتب ملاحظة أو تفاصيل مكالمة..."></textarea>
+      <button class="small-btn" id="addNoteBtn" style="margin-top:8px;">➕ إضافة ملاحظة</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">🔔 تذكير المتابعة</div>
+      <div class="reminder-row">
+        <div class="field" style="flex:1 1 140px;"><label>التاريخ</label><input type="date" id="reminderDateInput" /></div>
+        <div class="field" style="flex:2 1 200px;"><label>ملاحظة (اختياري)</label><input type="text" id="reminderNoteInput" placeholder="مثال: اتصل تأكيد السعر" /></div>
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button class="small-btn" id="setReminderBtn">🔔 تعيين</button>
+        <button class="small-btn secondary" id="clearReminderBtn">إزالة التذكير</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="detailClose" style="flex:1;">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<!-- Users admin modal -->
+<div class="modal-overlay hidden" id="usersModal">
+  <div class="modal-box wide">
+    <div class="modal-header">👥 إدارة المستخدمين</div>
+
+    <div class="detail-section" style="margin-top:12px;">
+      <div class="detail-section-title">➕ إضافة عضو جديد</div>
+      <div class="detail-grid">
+        <input type="text" id="newUserName" placeholder="الاسم" />
+        <input type="email" id="newUserEmail" placeholder="البريد الإلكتروني" />
+        <input type="password" id="newUserPassword" placeholder="كلمة سر مؤقتة (٦ أحرف فأكثر)" />
+      </div>
+      <button class="small-btn" id="createUserBtn" style="margin-top:10px;">إنشاء الحساب</button>
+      <div id="createUserMsg" style="font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">👥 الأعضاء الحاليين</div>
+      <div id="usersList"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="modal-cancel" id="usersClose" style="flex:1;">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ====== عدّل هذا الكائن بمفاتيح مشروعك من Firebase Console ======
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDxb_OiiA1qvqUlqlyiRjd5E91eC7pvCZ8",
+    authDomain: "mra-sales.firebaseapp.com",
+    databaseURL: "https://mra-sales-default-rtdb.firebaseio.com",
+    projectId: "mra-sales",
+    storageBucket: "mra-sales.firebasestorage.app",
+    messagingSenderId: "714571481122",
+    appId: "1:714571481122:web:d878aefaad091281fc0a7b"
+  };
+  // ==================================================================
+
+  var STAGES = ["جديد", "تم التواصل", "مهتم", "عميل فعلي", "مرفوض"];
+
+  var SEED_DATA = [{"name": "أزياء احمد شيال", "phone": "7715799722", "address": "الحرية"}, {"name": "سبورت نيو الحرية", "phone": "07734805118-07810066075", "address": "الحرية"}, {"name": "أزياء نبو", "phone": "7732002900", "address": "الحرية"}, {"name": "أزياء مودي", "phone": "7714854245", "address": "الحريه"}, {"name": "رويل كلاسك", "phone": "7744120200", "address": "الحريه"}, {"name": "boom_bam90", "phone": "7730338600", "address": "الحريه"}, {"name": "سلبر براند", "phone": "7875864210", "address": "الحريه"}, {"name": "عثمان ليون ", "phone": "7752765777", "address": "الدوره"}, {"name": "magno.iq", "phone": "7766333663", "address": "السيدية"}, {"name": "دي تو دي ", "phone": "7776966100", "address": "السيديه"}, {"name": "روما للمجوهرات", "phone": "7737323914", "address": "السيديه"}, {"name": "morano_casio", "phone": "7749999055", "address": "السيديه"}, {"name": "maxi__fashion", "phone": "7704000042", "address": "السيديه"}, {"name": "أزياء ماركه -للابسة النسائيه", "phone": "7750000207", "address": "السيديه"}, {"name": "HASAN FIT/للملابس الرجاليه", "phone": "7761111167", "address": "السيديه"}, {"name": "مودرن اوتفت", "phone": "7759813494", "address": "الشرطه الرابعه -شارع الضغط"}, {"name": "4M لتجهيزات الرياضية", "phone": "7725040250", "address": "القادسية"}, {"name": "fashion art", "phone": "7719922202", "address": "المنصور"}, {"name": "m.j store", "phone": "7714152019", "address": "المنصور"}, {"name": "علي الزيني للعطور", "phone": "7849998889", "address": "المنصور"}, {"name": "medgiftsiq", "phone": "7810999801", "address": "المنصور"}, {"name": "اميلانو", "phone": "7700220211", "address": "المنصور"}, {"name": "blueandwhite_iq", "phone": "7822122008", "address": "المنصور"}, {"name": "2b_fashion", "phone": "7822181183", "address": "المنصور"}, {"name": "ضفاف بغداد", "phone": "7760777770", "address": "المنصور"}, {"name": "ماركات للساعات والاكسسوارات", "phone": "7837721636", "address": "المنصور"}, {"name": "برج الساعات", "phone": "7873006660", "address": "المنصور"}, {"name": "كودي", "phone": "7739666999", "address": "المنصور"}, {"name": "الياقوته للمجوهرات", "phone": "7741788079", "address": "المنصور"}, {"name": "هايسن", "phone": "07732517586-07727380894", "address": "المنصور"}, {"name": "bugatti_iraq", "phone": "07703001188-07803001188", "address": "المنصور"}, {"name": "مجمع الرواد", "phone": "7757819089", "address": "المنصور الرواد"}, {"name": "الغليون", "phone": "7708706917", "address": "المنصور- مول العراق"}, {"name": "مفروشات الهلال", "phone": "7841807010", "address": "المواصلات الشرطه 4"}, {"name": "american wear", "phone": "7755550194", "address": "اليرموك قرب كليه الناحية"}, {"name": "سبورت نيو حي الجامعه", "phone": "7775818999", "address": "حي الجامعه"}, {"name": "انتيكا", "phone": "7733334623", "address": "حي الجامعه"}, {"name": "جامخانة", "phone": "7716934081", "address": "حي الجامعه"}, {"name": "مجمع البيلسان", "phone": "7858824822", "address": "حي الجامعه"}, {"name": "الوليد للعب الأطفال", "phone": "7729191929", "address": "حي الجامعه"}, {"name": "ريشة شوز", "phone": "7722888622", "address": "حي الجامعه"}, {"name": "أزياء بايكر", "phone": "7814003833", "address": "حي الجامعه -السيديه"}, {"name": "أزياء حمد", "phone": "7702675136", "address": "حي الجهاد"}, {"name": "غياث ستور", "phone": "7876001666", "address": "حي الجهاد"}, {"name": "trend_fashion", "phone": "7818188090", "address": "حي الخظراء"}, {"name": "صالح برشكا", "phone": "7719337060", "address": "حي العامل"}, {"name": "أزياء علاء للالبسه الرجاليه", "phone": "7710051130", "address": "حي العامل"}, {"name": "مكتبه الاخوين", "phone": "0783873700-07817823636", "address": "حي العامل 7 نيسان"}, {"name": "متجر شذرات", "phone": "7711401157", "address": "حي العامل السوق"}, {"name": "أزياء حنوره", "phone": "7736553576", "address": "حي العامل شارع 30"}, {"name": "زيتونه للازياء", "phone": "7751656243", "address": "حي العامل شارع 30"}, {"name": "أزياء seso", "phone": "7777149704", "address": "حي العامل شارع 30"}, {"name": "احمد أنور للامزون", "phone": "7781090555", "address": "حي العامل قرب البستان"}];
+
+  var records = [];
+  var users = {}; // uid -> {email, displayName, role, disabled}
+  var currentUser = null; // {uid, email, displayName, role}
+  var deleteKey = null, currentDetailKey = null;
+  var toastTimer = null, db = null, recordsRef = null, usersRef = null;
+  var reminderFilterActive = false;
+
+  function normalize(str) { return (str || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+  function escapeHtml(str) {
+    return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function stageClass(stage) { return "stage-" + String(stage || "جديد").replace(/\s+/g, "_"); }
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function isAdmin() { return !!(currentUser && currentUser.role === "admin"); }
+  function isConfigured() {
+    return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.indexOf("PASTE_") !== 0 &&
+           FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.databaseURL.indexOf("PASTE_") === -1;
+  }
+  function setSyncDot(state, label) {
+    var el = document.getElementById("syncDot");
+    var colors = { connecting: "#B0AA98", live: "#3DBE64", error: "#E0555A" };
+    el.innerHTML = '<span class="dot" style="background:' + colors[state] + ';"></span> ' + label;
+  }
+  function showToast(type, text) {
+    var el = document.getElementById("toast");
+    el.textContent = text;
+    el.style.background = type === "success" ? "#1F4E78" : type === "warn" ? "#B3261E" : "#4A4A4A";
+    el.classList.remove("hidden");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.add("hidden"); }, 3400);
+  }
+  function requireAdmin() {
+    if (!isAdmin()) { showToast("warn", "🔒 هذا الإجراء يحتاج صلاحية المسؤول"); return false; }
+    return true;
+  }
+
+  // ================= AUTH =================
+  var app, secondaryApp;
+
+  function initAuth() {
+    if (!isConfigured()) {
+      document.getElementById("setupNotice").classList.remove("hidden");
+      document.getElementById("loginError").textContent = "الإعداد ناقص — راجع تعليمات الملف قبل استخدامه";
+      return;
+    }
+    app = firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+    recordsRef = db.ref("records");
+    usersRef = db.ref("users");
+
+    firebase.auth().onAuthStateChanged(function (fbUser) {
+      if (!fbUser) { showLogin(); return; }
+      usersRef.once("value").then(function (snap) {
+        var all = snap.val() || {};
+        if (!snap.exists() || Object.keys(all).length === 0) {
+          // اول شخص يسجل دخول والقائمة فاضية = يصير مسؤول تلقائياً
+          var profile = { email: fbUser.email, displayName: fbUser.email.split("@")[0], role: "admin", disabled: false, createdAt: Date.now() };
+          usersRef.child(fbUser.uid).set(profile).then(function () { proceedLoggedIn(fbUser, profile); })
+            .catch(function () { document.getElementById("loginError").textContent = "تعذّر إنشاء حساب المسؤول — تحقق من قواعد الأمان"; firebase.auth().signOut(); });
+          return;
+        }
+        var myProfile = all[fbUser.uid];
+        if (!myProfile) {
+          document.getElementById("loginError").textContent = "حسابك غير مُفعّل من قبل المسؤول";
+          firebase.auth().signOut();
+          return;
+        }
+        if (myProfile.disabled) {
+          document.getElementById("loginError").textContent = "🚫 حسابك معطّل من قبل المسؤول";
+          firebase.auth().signOut();
+          return;
+        }
+        proceedLoggedIn(fbUser, myProfile);
+      }).catch(function () {
+        document.getElementById("loginError").textContent = "تعذّر التحقق من الحساب — تحقق من قواعد الأمان بقاعدة البيانات";
+        firebase.auth().signOut();
+      });
+    });
+  }
+
+  function proceedLoggedIn(fbUser, profile) {
+    currentUser = { uid: fbUser.uid, email: profile.email || fbUser.email, displayName: profile.displayName || fbUser.email, role: profile.role || "member" };
+    document.getElementById("loginScreen").classList.add("hidden");
+    document.getElementById("appRoot").classList.remove("hidden");
+    document.getElementById("whoChip").textContent = "👤 " + currentUser.displayName + (isAdmin() ? " (مسؤول)" : "");
+    document.getElementById("usersBtn").classList.toggle("hidden", !isAdmin());
+    document.getElementById("viewOnlyNotice").classList.toggle("hidden", isAdmin());
+    setSyncDot("connecting", "جارٍ التحميل...");
+    attachDataListeners();
+  }
+
+  function showLogin() {
+    currentUser = null;
+    document.getElementById("appRoot").classList.add("hidden");
+    document.getElementById("loginScreen").classList.remove("hidden");
+    document.getElementById("loginPassword").value = "";
+  }
+
+  document.getElementById("loginBtn").addEventListener("click", function () {
+    var email = document.getElementById("loginEmail").value.trim();
+    var pass = document.getElementById("loginPassword").value;
+    var errEl = document.getElementById("loginError");
+    errEl.textContent = "";
+    if (!email || !pass) { errEl.textContent = "أدخل البريد وكلمة السر"; return; }
+    if (!isConfigured()) { errEl.textContent = "الإعداد ناقص — راجع تعليمات الملف"; return; }
+    firebase.auth().signInWithEmailAndPassword(email, pass).catch(function (e) {
+      errEl.textContent = "بيانات الدخول غير صحيحة";
+    });
+  });
+  ["loginEmail", "loginPassword"].forEach(function (id) {
+    document.getElementById(id).addEventListener("keydown", function (e) { if (e.key === "Enter") document.getElementById("loginBtn").click(); });
+  });
+  document.getElementById("logoutBtn").addEventListener("click", function () { firebase.auth().signOut(); });
+
+  // ================= DATA LISTENERS =================
+  var seeded = false;
+  function attachDataListeners() {
+    recordsRef.once("value").then(function (snap) {
+      if (!snap.exists() && !seeded) {
+        seeded = true;
+        var updates = {};
+        SEED_DATA.forEach(function (r) {
+          var newKey = recordsRef.push().key;
+          updates[newKey] = { name: r.name, phone: r.phone, address: r.address, stage: "جديد" };
+        });
+        recordsRef.update(updates);
+      }
+    });
+
+    recordsRef.on("value", function (snapshot) {
+      var val = snapshot.val() || {};
+      records = Object.keys(val).map(function (key) {
+        var r = val[key] || {};
+        var notes = [];
+        if (r.notes) {
+          notes = Object.keys(r.notes).map(function (nk) {
+            var n = r.notes[nk] || {};
+            return { key: nk, text: n.text || "", author: n.author || "", ts: n.ts || 0 };
+          }).sort(function (a, b) { return b.ts - a.ts; });
+        }
+        return {
+          key: key, name: r.name || "", phone: r.phone || "", address: r.address || "",
+          stage: r.stage || "جديد", reminderDate: r.reminderDate || null, reminderNote: r.reminderNote || "",
+          notes: notes
+        };
+      });
+      setSyncDot("live", "مزامنة مباشرة بين الأجهزة ✓");
+      render();
+      if (currentDetailKey) refreshDetailModal();
+    }, function () { setSyncDot("error", "خطأ اتصال بالقاعدة"); });
+
+    usersRef.on("value", function (snapshot) {
+      users = snapshot.val() || {};
+      if (document.getElementById("usersModal").classList.contains("hidden") === false) renderUsersList();
+    });
+  }
+
+  function findByKey(key) { for (var i = 0; i < records.length; i++) if (records[i].key === key) return records[i]; return null; }
+  function writeRecord(key, data) { return recordsRef.child(key).update(data); }
+
+  // ================= FILTERS / RENDER (records) =================
+  function getRegions() {
+    var set = {};
+    records.forEach(function (r) { if (r.address) set[r.address.trim()] = (set[r.address.trim()] || 0) + 1; });
+    return set;
+  }
+  function reminderStatus(r) {
+    if (!r.reminderDate) return "none";
+    if (r.reminderDate < todayStr()) return "overdue";
+    if (r.reminderDate === todayStr()) return "today";
+    return "future";
+  }
+  function countDueReminders() { return records.filter(function (r) { var s = reminderStatus(r); return s === "today" || s === "overdue"; }).length; }
+
+  function getVisibleRecords() {
+    var regionFilter = document.getElementById("regionFilter").value || "الكل";
+    var stageFilter = document.getElementById("stageFilter").value || "الكل";
+    var search = normalize(document.getElementById("searchInput").value);
+    var list = records.slice();
+    if (reminderFilterActive) {
+      list = list.filter(function (r) { var s = reminderStatus(r); return s === "today" || s === "overdue"; });
+      list.sort(function (a, b) { return (a.reminderDate || "").localeCompare(b.reminderDate || ""); });
+      return list;
+    }
+    if (regionFilter !== "الكل") list = list.filter(function (r) { return (r.address || "").trim() === regionFilter; });
+    if (stageFilter !== "الكل") list = list.filter(function (r) { return r.stage === stageFilter; });
+    if (search) list = list.filter(function (r) { return normalize(r.name).indexOf(search) !== -1 || normalize(r.phone).indexOf(search) !== -1; });
+    list.sort(function (a, b) { return (a.address || "").localeCompare(b.address || "", "ar"); });
+    return list;
+  }
+  function renderRegionOptions() {
+    var sel = document.getElementById("regionFilter");
+    var current = sel.value || "الكل";
+    var counts = getRegions();
+    var keys = Object.keys(counts).sort(function (a, b) { return a.localeCompare(b, "ar"); });
+    var html = '<option value="الكل">الكل (' + records.length + ')</option>';
+    keys.forEach(function (k) { html += '<option value="' + escapeHtml(k) + '">' + escapeHtml(k) + ' (' + counts[k] + ')</option>'; });
+    sel.innerHTML = html;
+    if (keys.indexOf(current) !== -1 || current === "الكل") sel.value = current;
+  }
+  function reminderChipHtml(r) {
+    var s = reminderStatus(r);
+    if (s === "none") return '<span class="reminder-chip rem-none">—</span>';
+    var cls = s === "overdue" ? "rem-overdue" : s === "today" ? "rem-today" : "rem-future";
+    var label = s === "overdue" ? "متأخر ⚠️ " : s === "today" ? "اليوم 🔔 " : "";
+    return '<span class="reminder-chip ' + cls + '">' + label + escapeHtml(r.reminderDate) + '</span>';
+  }
+  function stageOptionsHtml(current) {
+    return STAGES.map(function (s) { return '<option value="' + s + '"' + (s === current ? " selected" : "") + '>' + s + '</option>'; }).join("");
+  }
+
+  function render() {
+    document.getElementById("headerSubtitle").textContent = "قسم المبيعات — " + records.length + " سجل";
+    document.getElementById("reminderCount").textContent = countDueReminders();
+    renderRegionOptions();
+
+    var visible = getVisibleRecords();
+    var body = document.getElementById("tableBody");
+    if (visible.length === 0) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state">لا توجد نتائج مطابقة</td></tr>';
+    } else {
+      body.innerHTML = visible.map(function (r) {
+        return '<tr>' +
+          '<td data-action="open-detail" data-key="' + r.key + '" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">' + escapeHtml(r.name) + '</td>' +
+          '<td style="font-variant-numeric: tabular-nums;">' + escapeHtml(r.phone) + '</td>' +
+          '<td>' + escapeHtml(r.address) + '</td>' +
+          '<td><select class="stage-select ' + stageClass(r.stage) + '" data-action="quick-stage" data-key="' + r.key + '">' + stageOptionsHtml(r.stage) + '</select></td>' +
+          '<td>' + reminderChipHtml(r) + '</td>' +
+          '<td class="no-print" style="white-space:nowrap;">' +
+            '<button class="icon-btn" data-action="open-detail" data-key="' + r.key + '" title="تفاصيل">📋</button>' +
+            '<button class="delete-btn" data-action="request-delete" data-key="' + r.key + '" title="حذف">' + (isAdmin() ? '🗑️' : '🔒') + '</button>' +
+          '</td></tr>';
+      }).join("");
+    }
+    document.getElementById("printMeta").textContent = "تاريخ الطباعة: " + new Date().toLocaleDateString("ar-IQ") + " | عدد السجلات: " + visible.length;
+  }
+
+  document.getElementById("addBtn").addEventListener("click", function () {
+    var name = document.getElementById("inName").value.trim();
+    var phone = document.getElementById("inPhone").value.trim();
+    var address = document.getElementById("inAddress").value.trim();
+    var dupAlert = document.getElementById("dupAlert");
+    if (!name || !phone || !address) { showToast("warn", "الرجاء تعبئة اسم البيج ورقم الهاتف والعنوان"); return; }
+    var existing = records.filter(function (r) { return normalize(r.name) === normalize(name); })[0];
+    if (existing) {
+      document.getElementById("dupDetail").innerHTML = "<b>" + escapeHtml(existing.name) + "</b> — " + escapeHtml(existing.phone) + " — " + escapeHtml(existing.address);
+      dupAlert.classList.remove("hidden"); return;
+    }
+    dupAlert.classList.add("hidden");
+    var newKey = recordsRef.push().key;
+    recordsRef.child(newKey).set({ name: name, phone: phone, address: address, stage: "جديد" })
+      .then(function () {
+        showToast("success", 'تمت إضافة "' + name + '" وحُفظت لكل الأجهزة');
+        document.getElementById("inName").value = ""; document.getElementById("inPhone").value = ""; document.getElementById("inAddress").value = "";
+      }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+  ["inName", "inPhone", "inAddress"].forEach(function (id) {
+    document.getElementById(id).addEventListener("keydown", function (e) { if (e.key === "Enter") document.getElementById("addBtn").click(); });
+    if (id === "inName") document.getElementById(id).addEventListener("input", function () { document.getElementById("dupAlert").classList.add("hidden"); });
+  });
+
+  document.getElementById("searchInput").addEventListener("input", render);
+  document.getElementById("regionFilter").addEventListener("change", render);
+  document.getElementById("stageFilter").addEventListener("change", render);
+  document.getElementById("reminderFilterBtn").addEventListener("click", function () {
+    reminderFilterActive = !reminderFilterActive;
+    this.classList.toggle("active", reminderFilterActive);
+    render();
+  });
+  document.getElementById("reminderBadgeBtn").addEventListener("click", function () {
+    reminderFilterActive = true;
+    document.getElementById("reminderFilterBtn").classList.add("active");
+    render();
+    window.scrollTo({ top: document.querySelector(".table-card").offsetTop - 20, behavior: "smooth" });
+  });
+
+  document.getElementById("tableBody").addEventListener("click", function (e) {
+    var el = e.target.closest("[data-action]");
+    if (!el) return;
+    var action = el.getAttribute("data-action");
+    var key = el.getAttribute("data-key");
+    if (action === "open-detail") openDetail(key);
+    else if (action === "request-delete") {
+      if (!requireAdmin()) return;
+      var r = findByKey(key); if (!r) return;
+      deleteKey = key;
+      document.getElementById("deleteTargetName").textContent = r.name;
+      document.getElementById("deleteModal").classList.remove("hidden");
+    }
+  });
+  document.getElementById("tableBody").addEventListener("change", function (e) {
+    var el = e.target.closest('[data-action="quick-stage"]');
+    if (!el) return;
+    writeRecord(el.getAttribute("data-key"), { stage: el.value })
+      .then(function () { showToast("success", "تم تحديث المرحلة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+
+  document.getElementById("deleteCancel").addEventListener("click", function () { document.getElementById("deleteModal").classList.add("hidden"); deleteKey = null; });
+  document.getElementById("deleteConfirm").addEventListener("click", function () {
+    if (!deleteKey) return;
+    var r = findByKey(deleteKey); var removedName = r ? r.name : "";
+    recordsRef.child(deleteKey).remove()
+      .then(function () { showToast("info", 'تم حذف "' + removedName + '" من كل الأجهزة'); })
+      .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+    deleteKey = null;
+    document.getElementById("deleteModal").classList.add("hidden");
+  });
+
+  // ================= DETAIL MODAL =================
+  function openDetail(key) { currentDetailKey = key; refreshDetailModal(); document.getElementById("detailModal").classList.remove("hidden"); }
+  function refreshDetailModal() {
+    var r = findByKey(currentDetailKey);
+    if (!r) { document.getElementById("detailModal").classList.add("hidden"); return; }
+    document.getElementById("detailName").textContent = r.name;
+    document.getElementById("detailNameInput").value = r.name;
+    document.getElementById("detailPhoneInput").value = r.phone;
+    document.getElementById("detailAddressInput").value = r.address;
+    document.getElementById("detailNameInput").disabled = !isAdmin();
+    document.getElementById("detailPhoneInput").disabled = !isAdmin();
+    document.getElementById("detailAddressInput").disabled = !isAdmin();
+    document.getElementById("detailSaveContact").style.display = isAdmin() ? "inline-flex" : "none";
+    document.getElementById("detailContactHint").textContent = isAdmin() ? "" : "🔒 تعديل بيانات التواصل للمسؤول فقط";
+    document.getElementById("detailStageSelect").value = r.stage;
+
+    var notesList = document.getElementById("notesList");
+    notesList.innerHTML = !r.notes.length
+      ? '<div style="font-size:12.5px; color:#B0AA98; text-align:center; padding:10px 0;">لا توجد ملاحظات بعد</div>'
+      : r.notes.map(function (n) {
+          var d = n.ts ? new Date(n.ts).toLocaleString("ar-IQ", { dateStyle: "medium", timeStyle: "short" }) : "";
+          return '<div class="note-item">' + escapeHtml(n.text) + '<div class="note-meta">👤 ' + escapeHtml(n.author || "غير معروف") + ' — ' + d + '</div></div>';
+        }).join("");
+    document.getElementById("newNoteText").value = "";
+    document.getElementById("reminderDateInput").value = r.reminderDate || "";
+    document.getElementById("reminderNoteInput").value = r.reminderNote || "";
+  }
+  document.getElementById("detailClose").addEventListener("click", function () { document.getElementById("detailModal").classList.add("hidden"); currentDetailKey = null; });
+
+  document.getElementById("detailSaveContact").addEventListener("click", function () {
+    if (!requireAdmin() || !currentDetailKey) return;
+    var name = document.getElementById("detailNameInput").value.trim();
+    var phone = document.getElementById("detailPhoneInput").value.trim();
+    var address = document.getElementById("detailAddressInput").value.trim();
+    if (!name || !phone || !address) { showToast("warn", "لا يمكن ترك خانة فارغة"); return; }
+    var dup = records.filter(function (r) { return r.key !== currentDetailKey && normalize(r.name) === normalize(name); })[0];
+    if (dup) { showToast("warn", 'الاسم "' + name + '" مستخدم مسبقًا لبيج آخر'); return; }
+    writeRecord(currentDetailKey, { name: name, phone: phone, address: address })
+      .then(function () { showToast("success", "تم حفظ التعديل لكل الأجهزة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+  document.getElementById("detailStageSelect").addEventListener("change", function () {
+    if (!currentDetailKey) return;
+    writeRecord(currentDetailKey, { stage: this.value }).then(function () { showToast("success", "تم تحديث المرحلة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+  document.getElementById("addNoteBtn").addEventListener("click", function () {
+    var text = document.getElementById("newNoteText").value.trim();
+    if (!text) { showToast("warn", "اكتب نص الملاحظة أولاً"); return; }
+    if (!currentDetailKey) return;
+    var key = currentDetailKey;
+    var noteRef = recordsRef.child(key).child("notes").push();
+    noteRef.set({ text: text, author: currentUser.displayName, ts: Date.now() })
+      .then(function () {
+        showToast("success", "تمت إضافة الملاحظة");
+        document.getElementById("newNoteText").value = "";
+        var r = findByKey(key);
+        if (r && r.stage === "جديد") writeRecord(key, { stage: "تم التواصل" });
+      }).catch(function () { showToast("warn", "⚠️ فشل حفظ الملاحظة"); });
+  });
+  document.getElementById("setReminderBtn").addEventListener("click", function () {
+    var date = document.getElementById("reminderDateInput").value;
+    var note = document.getElementById("reminderNoteInput").value.trim();
+    if (!date) { showToast("warn", "اختر تاريخ المتابعة أولاً"); return; }
+    if (!currentDetailKey) return;
+    writeRecord(currentDetailKey, { reminderDate: date, reminderNote: note })
+      .then(function () { showToast("success", "تم تعيين التذكير"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+  document.getElementById("clearReminderBtn").addEventListener("click", function () {
+    if (!currentDetailKey) return;
+    writeRecord(currentDetailKey, { reminderDate: null, reminderNote: "" })
+      .then(function () {
+        showToast("info", "تمت إزالة التذكير");
+        document.getElementById("reminderDateInput").value = ""; document.getElementById("reminderNoteInput").value = "";
+      }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+
+  // ================= USERS ADMIN =================
+  document.getElementById("usersBtn").addEventListener("click", function () {
+    if (!requireAdmin()) return;
+    renderUsersList();
+    document.getElementById("usersModal").classList.remove("hidden");
+  });
+  document.getElementById("usersClose").addEventListener("click", function () { document.getElementById("usersModal").classList.add("hidden"); });
+
+  function renderUsersList() {
+    var wrap = document.getElementById("usersList");
+    var uids = Object.keys(users);
+    if (!uids.length) { wrap.innerHTML = '<div style="font-size:13px; color:#9A9A9A;">لا يوجد أعضاء بعد</div>'; return; }
+    wrap.innerHTML = uids.map(function (uid) {
+      var u = users[uid];
+      var isMe = uid === currentUser.uid;
+      var initial = (u.displayName || u.email || "?").trim().charAt(0).toUpperCase();
+      return '<div class="user-row">' +
+        '<div class="user-avatar">' + escapeHtml(initial) + '</div>' +
+        '<div class="user-info">' +
+          '<div class="user-name-line">' +
+            '<span class="uname-text" data-uid="' + uid + '">' + escapeHtml(u.displayName || "") + '</span>' +
+            (u.role === "admin" ? '<span class="role-badge">مسؤول</span>' : '') +
+            (u.disabled ? '<span class="disabled-badge">معطّل</span>' : '') +
+          '</div>' +
+          '<div class="user-email-line">' + escapeHtml(u.email || "") + (isMe ? " (أنت)" : "") + '</div>' +
+        '</div>' +
+        '<div class="user-actions">' +
+          (isMe ? '' :
+            '<button class="tiny-btn" data-action="rename-user" data-uid="' + uid + '">✏️ الاسم</button>' +
+            '<button class="tiny-btn warn" data-action="toggle-disable" data-uid="' + uid + '">' + (u.disabled ? "✅ تفعيل" : "⛔ تعطيل") + '</button>' +
+            '<button class="tiny-btn danger" data-action="delete-user" data-uid="' + uid + '">🗑️ حذف</button>'
+          ) +
+        '</div></div>';
+    }).join("");
+  }
+
+  document.getElementById("usersList").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    var uid = btn.getAttribute("data-uid");
+    var action = btn.getAttribute("data-action");
+    var u = users[uid];
+    if (!u) return;
+
+    if (action === "toggle-disable") {
+      usersRef.child(uid).update({ disabled: !u.disabled })
+        .then(function () { showToast("success", u.disabled ? "تم تفعيل الحساب" : "تم تعطيل الحساب"); })
+        .catch(function () { showToast("warn", "⚠️ فشل التنفيذ"); });
+    } else if (action === "delete-user") {
+      if (!confirm('حذف وصول "' + (u.displayName || u.email) + '" نهائيًا؟ (لن يقدر يدخل الموقع بعدها)')) return;
+      usersRef.child(uid).remove()
+        .then(function () { showToast("info", "تم حذف وصول المستخدم"); })
+        .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+    } else if (action === "rename-user") {
+      var newName = prompt("الاسم الجديد:", u.displayName || "");
+      if (newName === null) return;
+      newName = newName.trim();
+      if (!newName) { showToast("warn", "الاسم لا يمكن أن يكون فارغًا"); return; }
+      usersRef.child(uid).update({ displayName: newName })
+        .then(function () { showToast("success", "تم تحديث الاسم"); })
+        .catch(function () { showToast("warn", "⚠️ فشل التحديث"); });
+    }
+  });
+
+  document.getElementById("createUserBtn").addEventListener("click", function () {
+    var name = document.getElementById("newUserName").value.trim();
+    var email = document.getElementById("newUserEmail").value.trim();
+    var pass = document.getElementById("newUserPassword").value;
+    var msg = document.getElementById("createUserMsg");
+    msg.style.color = "#B3261E"; msg.textContent = "";
+    if (!name || !email || !pass) { msg.textContent = "عبّي كل الحقول"; return; }
+    if (pass.length < 6) { msg.textContent = "كلمة السر لازم ٦ أحرف فأكثر"; return; }
+
+    // نستخدم تطبيق Firebase ثانوي حتى إنشاء الحساب الجديد ما يسجّل خروجك أنت
+    try {
+      secondaryApp = firebase.apps.filter(function (a) { return a.name === "Secondary"; })[0] ||
+        firebase.initializeApp(FIREBASE_CONFIG, "Secondary");
+    } catch (e) { msg.textContent = "خطأ إعداد — حاول تحديث الصفحة"; return; }
+
+    secondaryApp.auth().createUserWithEmailAndPassword(email, pass)
+      .then(function (cred) {
+        var newUid = cred.user.uid;
+        return usersRef.child(newUid).set({ email: email, displayName: name, role: "member", disabled: false, createdAt: Date.now() })
+          .then(function () { return secondaryApp.auth().signOut(); });
+      })
+      .then(function () {
+        msg.style.color = "#2E7D32";
+        msg.textContent = "✅ تم إنشاء الحساب — أعطِ الشخص البريد وكلمة السر ليسجّل دخول";
+        document.getElementById("newUserName").value = "";
+        document.getElementById("newUserEmail").value = "";
+        document.getElementById("newUserPassword").value = "";
+      })
+      .catch(function (e) {
+        var code = e && e.code ? e.code : "";
+        if (code === "auth/email-already-in-use") msg.textContent = "هذا البريد مستخدم مسبقًا";
+        else if (code === "auth/invalid-email") msg.textContent = "بريد إلكتروني غير صالح";
+        else msg.textContent = "تعذّر إنشاء الحساب: " + (e && e.message ? e.message : "");
+      });
+  });
+
+  // ================= EXPORTS =================
+  document.getElementById("exportExcelBtn").addEventListener("click", function () {
+    try {
+      var sorted = records.slice().sort(function (a, b) { return (a.address || "").localeCompare(b.address || "", "ar"); });
+      var rows = sorted.map(function (r) {
+        var lastNote = r.notes && r.notes.length ? r.notes[0].text : "";
+        return {
+          "البيج": r.name, "رقم الهاتف": r.phone, "العنوان": r.address, "المرحلة": r.stage,
+          "تاريخ المتابعة القادمة": r.reminderDate || "", "ملاحظة المتابعة": r.reminderNote || "",
+          "عدد الملاحظات": r.notes ? r.notes.length : 0, "آخر ملاحظة": lastNote
+        };
+      });
+      var ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [{ wch: 28 }, { wch: 20 }, { wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 30 }];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "البيانات");
+      XLSX.writeFile(wb, "سجل_CRM.xlsx");
+      showToast("success", "تم تصدير الملف بنجاح");
+    } catch (e) { showToast("warn", "تعذّر التصدير — حاول مرة أخرى"); }
+  });
+  document.getElementById("exportPdfBtn").addEventListener("click", function () { try { window.print(); } catch (e) {} });
+
+  // ================= INIT =================
+  initAuth();
+})();
+</script>
+</body>
+</html>
