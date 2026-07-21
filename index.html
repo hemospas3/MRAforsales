@@ -23,15 +23,41 @@
          "users": {
            ".read": "auth != null",
            "$uid": {
-             ".write": "(auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin') || (!root.child('users').exists() && auth.uid === $uid)"
+             ".write": "auth != null && ((!root.child('users').exists() && auth.uid === $uid) || root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('canManageUsers').val() === true || (auth.uid === $uid && newData.child('role').val() === data.child('role').val() && newData.child('disabled').val() === data.child('disabled').val() && newData.child('canManageUsers').val() === data.child('canManageUsers').val()))"
            }
          },
          "records": {
+           ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+           "$ownerUid": {
+             ".read": "auth != null && (auth.uid === $ownerUid || root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child($ownerUid).child('supervisorUids').child(auth.uid).val() === true)",
+             ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false && (auth.uid === $ownerUid || root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child($ownerUid).child('supervisorUids').child(auth.uid).val() === true)"
+           }
+         },
+         "dailyReports": {
+           ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+           "$ownerUid": {
+             ".read": "auth != null && (auth.uid === $ownerUid || root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child($ownerUid).child('supervisorUids').child(auth.uid).val() === true)",
+             ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false && (auth.uid === $ownerUid || root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child($ownerUid).child('supervisorUids').child(auth.uid).val() === true)"
+           }
+         },
+         "pendingItems": {
            ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false",
            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('disabled').val() === false"
          }
        }
      }
+
+     ⚠️ هذا التحديث ضروري بعد إضافة نظام "المشرفين" والتقارير اليومية
+     والمتعلقات. يخلي "records" و"dailyReports" مخزّنة تحت مسار كل
+     موظف (records/UID_الموظف/...) بدل خانة واحدة مشتركة، حتى تقدر
+     قاعدة البيانات نفسها (مو الواجهة بس) تمنع أي شخص من قراءة بيانات
+     موظف غيره إلا إذا كان مسؤولًا حقيقيًا أو مُعيَّنًا "مشرفًا" عليه.
+     ⚠️ ملاحظة أمانة: خانة "pendingItems" (المتعلقات) مفتوحة القراءة
+     لأي حساب مسجّل دخول وغير معطّل — التحكم بمين يشوف كل عنصر تحديدًا
+     يتم من الواجهة (المشاركة الاختيارية)، وليس مفروضًا من قاعدة
+     البيانات نفسها، لأن Realtime Database ما تدعم تصفية القوائم حسب
+     شرط داخل كل عنصر. إذا احتجت هذا المستوى من الصرامة بالمتعلقات
+     مستقبلًا، خبرني وأبنيها ببنية مماثلة للسجلات (مجلد لكل موظف).
 
      هذا يمنع أي شخص من فتح الموقع أو رؤية البيانات إلا إذا كان
      حسابه موجود بقائمة المستخدمين ومو معطّل. بدون هذي القواعد،
@@ -187,9 +213,20 @@
   .rem-today { background: #FFF6DC; color: #8A6D00; }
   .rem-overdue { background: #FDECEA; color: #B3261E; }
 
-  .icon-btn { background: transparent; border: none; color: var(--navy); cursor: pointer; padding: 4px; margin: 0 2px; font-size: 15px; }
+  .icon-btn { background: transparent; border: none; color: var(--navy); cursor: pointer; padding: 4px; margin: 0 2px; font-size: 15px; text-decoration: none; display: inline-flex; }
   .delete-btn { background: transparent; border: none; color: #B3B3B3; cursor: pointer; padding: 4px; font-size: 15px; }
   .empty-state { padding: 30px; text-align: center; color: #9A9A9A; font-size: 14px; }
+  .phone-line { display: flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
+  .phone-line + .phone-line { margin-top: 3px; }
+  .phone-link { text-decoration: none; font-size: 13px; line-height: 1; }
+  .phone-num { font-variant-numeric: tabular-nums; }
+  .user-supervisors { margin-top: 4px; font-size: 12px; color: #6B6B6B; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .sup-chip { background: #EDF3F8; color: #1F4E78; border-radius: 12px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px; }
+  .sup-chip button { border: none; background: transparent; color: #B3261E; cursor: pointer; font-weight: 700; padding: 0; }
+  .share-chip { display: inline-flex; align-items: center; gap: 4px; background: #F5F3EE; border-radius: 10px; padding: 3px 8px; font-size: 12.5px; }
+  .mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .mini-table th, .mini-table td { border: 1px solid #E4E0D6; padding: 6px 8px; text-align: right; }
+  .mini-table th { background: #F5F3EE; }
 
   .toast { position: fixed; bottom: 24px; right: 24px; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.2); z-index: 60; max-width: 320px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(31,78,120,0.35); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
@@ -273,6 +310,8 @@
       <div class="header-btns">
         <span class="who-chip" id="whoChip"></span>
         <button id="reminderBadgeBtn" class="pill-btn">🔔 <span id="reminderCount">0</span></button>
+        <button id="reportsBtn" class="pill-btn">📄 التقارير اليومية</button>
+        <button id="pendingBtn" class="pill-btn">📌 المتعلقات</button>
         <button id="usersBtn" class="pill-btn hidden">👥 المستخدمين</button>
         <button id="logoutBtn" class="pill-btn">🚪 خروج</button>
       </div>
@@ -331,6 +370,7 @@
           <th>📍 العنوان</th>
           <th>المرحلة</th>
           <th>المتابعة القادمة</th>
+          <th class="no-print">👤 المدخل</th>
           <th class="no-print" style="width:80px;"></th>
         </tr>
       </thead>
@@ -361,7 +401,13 @@
     <div class="modal-header">📋 <span id="detailName">—</span></div>
     <div class="detail-grid" style="margin-top:14px;">
       <div class="field"><label>اسم البيج</label><input type="text" id="detailNameInput" /></div>
-      <div class="field"><label>رقم الهاتف</label><input type="text" id="detailPhoneInput" /></div>
+      <div class="field"><label>رقم الهاتف</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="text" id="detailPhoneInput" style="flex:1;" />
+          <a href="#" id="detailCallBtn" class="icon-btn" title="اتصال">📞</a>
+          <a href="#" id="detailWaBtn" class="icon-btn" target="_blank" rel="noopener" title="واتساب">💬</a>
+        </div>
+      </div>
       <div class="field"><label>العنوان / المنطقة</label><input type="text" id="detailAddressInput" /></div>
     </div>
     <div style="margin-top:10px; display:flex; gap:8px;">
@@ -413,6 +459,9 @@
         <input type="email" id="newUserEmail" placeholder="البريد الإلكتروني" />
         <input type="password" id="newUserPassword" placeholder="كلمة سر مؤقتة (٦ أحرف فأكثر)" />
       </div>
+      <label id="newUserManageWrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#6B6B6B; margin-top:8px;">
+        <input type="checkbox" id="newUserCanManage" style="width:auto;" /> منحه صلاحية إدارة المستخدمين (إضافة / تعديل / حذف)
+      </label>
       <button class="small-btn" id="createUserBtn" style="margin-top:10px;">إنشاء الحساب</button>
       <div id="createUserMsg" style="font-size:12.5px; margin-top:8px;"></div>
     </div>
@@ -424,6 +473,65 @@
 
     <div class="modal-actions">
       <button class="modal-cancel" id="usersClose" style="flex:1;">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<!-- Daily Reports modal -->
+<div class="modal-overlay hidden" id="reportsModal">
+  <div class="modal-box wide">
+    <div class="modal-header">📄 التقارير اليومية</div>
+    <div class="detail-section" style="margin-top:12px;">
+      <div class="detail-section-title">➕ إضافة تقرير جديد</div>
+      <div class="detail-grid">
+        <div class="field"><label>رقم الوصل أو العميل</label><input type="text" id="repReceipt" placeholder="مثال: 1024 أو اسم العميل" /></div>
+        <div class="field"><label>مشكلة الطلب</label><input type="text" id="repIssue" placeholder="وصف المشكلة" /></div>
+        <div class="field"><label>النتيجة</label><input type="text" id="repResult" placeholder="النتيجة النهائية" /></div>
+      </div>
+      <button class="small-btn" id="addReportBtn" style="margin-top:10px;">➕ إضافة التقرير</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>📋 التقارير (المرئية لك)</span>
+        <button class="small-btn secondary" id="exportReportsPdfBtn" style="margin:0;">🖨️ تصدير PDF</button>
+      </div>
+      <div id="reportsList" style="margin-top:8px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="reportsClose" style="flex:1;">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pending Items (المتعلقات) modal -->
+<div class="modal-overlay hidden" id="pendingModal">
+  <div class="modal-box wide">
+    <div class="modal-header">📌 المتعلقات — طلبات بدون معالجة كاملة</div>
+    <div class="detail-section" style="margin-top:12px;">
+      <div class="detail-section-title">➕ إضافة متعلق جديد</div>
+      <div class="detail-grid">
+        <div class="field"><label>رقم الوصل</label><input type="text" id="pendReceipt" placeholder="رقم الوصل" /></div>
+        <div class="field"><label>تاريخ ووقت بدء المعالجة</label><input type="datetime-local" id="pendStarted" /></div>
+        <div class="field"><label>السبب</label><input type="text" id="pendReason" placeholder="سبب تعليق المعالجة" /></div>
+      </div>
+      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#6B6B6B; margin-top:8px;">
+        <input type="checkbox" id="pendShareAll" style="width:auto;" /> مشاركة مع كل الموظفين (لتسليم الشفت)
+      </label>
+      <div id="pendShareListWrap" style="margin-top:8px;">
+        <div style="font-size:12.5px; color:#6B6B6B; margin-bottom:6px;">أو اختر موظفين محددين للمشاركة معهم:</div>
+        <div id="pendShareList" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+      <button class="small-btn" id="addPendingBtn" style="margin-top:10px;">➕ إضافة المتعلق</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>📋 المتعلقات (المرئية لك)</span>
+        <button class="small-btn secondary" id="exportPendingExcelBtn" style="margin:0;">⬇️ تصدير Excel</button>
+      </div>
+      <div id="pendingList" style="margin-top:8px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="pendingClose" style="flex:1;">إغلاق</button>
     </div>
   </div>
 </div>
@@ -451,11 +559,14 @@
   var SEED_DATA = [{"name": "أزياء احمد شيال", "phone": "7715799722", "address": "الحرية"}, {"name": "سبورت نيو الحرية", "phone": "07734805118-07810066075", "address": "الحرية"}, {"name": "أزياء نبو", "phone": "7732002900", "address": "الحرية"}, {"name": "أزياء مودي", "phone": "7714854245", "address": "الحريه"}, {"name": "رويل كلاسك", "phone": "7744120200", "address": "الحريه"}, {"name": "boom_bam90", "phone": "7730338600", "address": "الحريه"}, {"name": "سلبر براند", "phone": "7875864210", "address": "الحريه"}, {"name": "عثمان ليون ", "phone": "7752765777", "address": "الدوره"}, {"name": "magno.iq", "phone": "7766333663", "address": "السيدية"}, {"name": "دي تو دي ", "phone": "7776966100", "address": "السيديه"}, {"name": "روما للمجوهرات", "phone": "7737323914", "address": "السيديه"}, {"name": "morano_casio", "phone": "7749999055", "address": "السيديه"}, {"name": "maxi__fashion", "phone": "7704000042", "address": "السيديه"}, {"name": "أزياء ماركه -للابسة النسائيه", "phone": "7750000207", "address": "السيديه"}, {"name": "HASAN FIT/للملابس الرجاليه", "phone": "7761111167", "address": "السيديه"}, {"name": "مودرن اوتفت", "phone": "7759813494", "address": "الشرطه الرابعه -شارع الضغط"}, {"name": "4M لتجهيزات الرياضية", "phone": "7725040250", "address": "القادسية"}, {"name": "fashion art", "phone": "7719922202", "address": "المنصور"}, {"name": "m.j store", "phone": "7714152019", "address": "المنصور"}, {"name": "علي الزيني للعطور", "phone": "7849998889", "address": "المنصور"}, {"name": "medgiftsiq", "phone": "7810999801", "address": "المنصور"}, {"name": "اميلانو", "phone": "7700220211", "address": "المنصور"}, {"name": "blueandwhite_iq", "phone": "7822122008", "address": "المنصور"}, {"name": "2b_fashion", "phone": "7822181183", "address": "المنصور"}, {"name": "ضفاف بغداد", "phone": "7760777770", "address": "المنصور"}, {"name": "ماركات للساعات والاكسسوارات", "phone": "7837721636", "address": "المنصور"}, {"name": "برج الساعات", "phone": "7873006660", "address": "المنصور"}, {"name": "كودي", "phone": "7739666999", "address": "المنصور"}, {"name": "الياقوته للمجوهرات", "phone": "7741788079", "address": "المنصور"}, {"name": "هايسن", "phone": "07732517586-07727380894", "address": "المنصور"}, {"name": "bugatti_iraq", "phone": "07703001188-07803001188", "address": "المنصور"}, {"name": "مجمع الرواد", "phone": "7757819089", "address": "المنصور الرواد"}, {"name": "الغليون", "phone": "7708706917", "address": "المنصور- مول العراق"}, {"name": "مفروشات الهلال", "phone": "7841807010", "address": "المواصلات الشرطه 4"}, {"name": "american wear", "phone": "7755550194", "address": "اليرموك قرب كليه الناحية"}, {"name": "سبورت نيو حي الجامعه", "phone": "7775818999", "address": "حي الجامعه"}, {"name": "انتيكا", "phone": "7733334623", "address": "حي الجامعه"}, {"name": "جامخانة", "phone": "7716934081", "address": "حي الجامعه"}, {"name": "مجمع البيلسان", "phone": "7858824822", "address": "حي الجامعه"}, {"name": "الوليد للعب الأطفال", "phone": "7729191929", "address": "حي الجامعه"}, {"name": "ريشة شوز", "phone": "7722888622", "address": "حي الجامعه"}, {"name": "أزياء بايكر", "phone": "7814003833", "address": "حي الجامعه -السيديه"}, {"name": "أزياء حمد", "phone": "7702675136", "address": "حي الجهاد"}, {"name": "غياث ستور", "phone": "7876001666", "address": "حي الجهاد"}, {"name": "trend_fashion", "phone": "7818188090", "address": "حي الخظراء"}, {"name": "صالح برشكا", "phone": "7719337060", "address": "حي العامل"}, {"name": "أزياء علاء للالبسه الرجاليه", "phone": "7710051130", "address": "حي العامل"}, {"name": "مكتبه الاخوين", "phone": "0783873700-07817823636", "address": "حي العامل 7 نيسان"}, {"name": "متجر شذرات", "phone": "7711401157", "address": "حي العامل السوق"}, {"name": "أزياء حنوره", "phone": "7736553576", "address": "حي العامل شارع 30"}, {"name": "زيتونه للازياء", "phone": "7751656243", "address": "حي العامل شارع 30"}, {"name": "أزياء seso", "phone": "7777149704", "address": "حي العامل شارع 30"}, {"name": "احمد أنور للامزون", "phone": "7781090555", "address": "حي العامل قرب البستان"}];
 
   var records = [];
-  var users = {}; // uid -> {email, displayName, role, disabled}
+  var users = {}; // uid -> {email, displayName, role, disabled, canManageUsers, supervisorUids}
   var currentUser = null; // {uid, email, displayName, role}
   var deleteKey = null, currentDetailKey = null;
-  var toastTimer = null, db = null, recordsRef = null, usersRef = null;
+  var toastTimer = null, db = null, recordsRef = null, usersRef = null, reportsRef = null, pendingRef = null;
   var reminderFilterActive = false;
+  var recordsByOwner = {}, recordListeners = {}, adminRecordsAttached = false;
+  var reports = [], reportsByOwner = {}, reportListeners = {}, adminReportsAttached = false;
+  var pendingItems = [];
 
   function normalize(str) { return (str || "").trim().replace(/\s+/g, " ").toLowerCase(); }
   function escapeHtml(str) {
@@ -469,6 +580,30 @@
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
   function isAdmin() { return !!(currentUser && currentUser.role === "admin"); }
+  function canManageUsers() { return !!(currentUser && (currentUser.role === "admin" || currentUser.canManageUsers)); }
+  function phoneNumbers(str) { return String(str || "").split(/[-\/,]+/).map(function (s) { return s.trim(); }).filter(Boolean); }
+  function telHref(num) {
+    var digits = num.replace(/\D/g, "");
+    if (digits.length === 10 && digits.charAt(0) !== "0") digits = "0" + digits;
+    return "tel:" + digits;
+  }
+  function waHref(num) {
+    var digits = num.replace(/\D/g, "");
+    if (digits.charAt(0) === "0") digits = digits.slice(1);
+    if (digits.indexOf("964") !== 0) digits = "964" + digits;
+    return "https://wa.me/" + digits;
+  }
+  function phoneCellHtml(phone) {
+    var nums = phoneNumbers(phone);
+    if (!nums.length) return "";
+    return nums.map(function (p) {
+      return '<div class="phone-line">' +
+        '<a class="phone-link" href="' + telHref(p) + '" title="اتصال" onclick="event.stopPropagation();">📞</a>' +
+        '<a class="phone-link" href="' + waHref(p) + '" target="_blank" rel="noopener" title="واتساب" onclick="event.stopPropagation();">💬</a>' +
+        '<span class="phone-num">' + escapeHtml(p) + '</span>' +
+      '</div>';
+    }).join("");
+  }
   function isConfigured() {
     return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.indexOf("PASTE_") !== 0 &&
            FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.databaseURL.indexOf("PASTE_") === -1;
@@ -504,6 +639,8 @@
     db = firebase.database();
     recordsRef = db.ref("records");
     usersRef = db.ref("users");
+    reportsRef = db.ref("dailyReports");
+    pendingRef = db.ref("pendingItems");
 
     firebase.auth().onAuthStateChanged(function (fbUser) {
       if (!fbUser) { showLogin(); return; }
@@ -536,11 +673,11 @@
   }
 
   function proceedLoggedIn(fbUser, profile) {
-    currentUser = { uid: fbUser.uid, email: profile.email || fbUser.email, displayName: profile.displayName || fbUser.email, role: profile.role || "member" };
+    currentUser = { uid: fbUser.uid, email: profile.email || fbUser.email, displayName: profile.displayName || fbUser.email, role: profile.role || "member", canManageUsers: !!profile.canManageUsers };
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("appRoot").classList.remove("hidden");
     document.getElementById("whoChip").textContent = "👤 " + currentUser.displayName + (isAdmin() ? " (مسؤول)" : "");
-    document.getElementById("usersBtn").classList.toggle("hidden", !isAdmin());
+    document.getElementById("usersBtn").classList.toggle("hidden", !canManageUsers());
     document.getElementById("viewOnlyNotice").classList.toggle("hidden", isAdmin());
     setSyncDot("connecting", "جارٍ التحميل...");
     attachDataListeners();
@@ -571,23 +708,23 @@
 
   // ================= DATA LISTENERS =================
   var seeded = false;
-  function attachDataListeners() {
-    recordsRef.once("value").then(function (snap) {
-      if (!snap.exists() && !seeded) {
-        seeded = true;
-        var updates = {};
-        SEED_DATA.forEach(function (r) {
-          var newKey = recordsRef.push().key;
-          updates[newKey] = { name: r.name, phone: r.phone, address: r.address, stage: "جديد" };
-        });
-        recordsRef.update(updates);
-      }
-    });
+  var pendingRawVal = {};
 
-    recordsRef.on("value", function (snapshot) {
-      var val = snapshot.val() || {};
-      records = Object.keys(val).map(function (key) {
-        var r = val[key] || {};
+  function computeSupervisedUids() {
+    var set = {};
+    Object.keys(users).forEach(function (uid) {
+      var u = users[uid];
+      if (u && u.supervisorUids && u.supervisorUids[currentUser.uid]) set[uid] = true;
+    });
+    return set;
+  }
+
+  function rebuildRecordsArray() {
+    var flat = [];
+    Object.keys(recordsByOwner).forEach(function (ownerUid) {
+      var ownerRecs = recordsByOwner[ownerUid] || {};
+      Object.keys(ownerRecs).forEach(function (key) {
+        var r = ownerRecs[key] || {};
         var notes = [];
         if (r.notes) {
           notes = Object.keys(r.notes).map(function (nk) {
@@ -595,25 +732,165 @@
             return { key: nk, text: n.text || "", author: n.author || "", ts: n.ts || 0 };
           }).sort(function (a, b) { return b.ts - a.ts; });
         }
-        return {
-          key: key, name: r.name || "", phone: r.phone || "", address: r.address || "",
+        flat.push({
+          key: key, ownerUid: ownerUid, name: r.name || "", phone: r.phone || "", address: r.address || "",
           stage: r.stage || "جديد", reminderDate: r.reminderDate || null, reminderNote: r.reminderNote || "",
           notes: notes
-        };
+        });
       });
-      setSyncDot("live", "مزامنة مباشرة بين الأجهزة ✓");
-      render();
-      if (currentDetailKey) refreshDetailModal();
-    }, function () { setSyncDot("error", "خطأ اتصال بالقاعدة"); });
+    });
+    records = flat;
+    setSyncDot("live", "مزامنة مباشرة بين الأجهزة ✓");
+    render();
+    if (currentDetailKey) refreshDetailModal();
+  }
+
+  function syncRecordListeners() {
+    if (isAdmin()) {
+      if (!adminRecordsAttached) {
+        adminRecordsAttached = true;
+        recordsRef.on("value", function (snapshot) {
+          recordsByOwner = snapshot.val() || {};
+          rebuildRecordsArray();
+        }, function () { setSyncDot("error", "خطأ اتصال بالقاعدة"); });
+      }
+      return;
+    }
+    var accessible = computeSupervisedUids();
+    accessible[currentUser.uid] = true;
+    Object.keys(accessible).forEach(function (uid) {
+      if (recordListeners[uid]) return;
+      recordListeners[uid] = true;
+      recordsRef.child(uid).on("value", function (snapshot) {
+        recordsByOwner[uid] = snapshot.val() || {};
+        rebuildRecordsArray();
+      }, function () { setSyncDot("error", "خطأ اتصال بالقاعدة"); });
+    });
+    Object.keys(recordListeners).forEach(function (uid) {
+      if (accessible[uid]) return;
+      recordsRef.child(uid).off();
+      delete recordListeners[uid];
+      delete recordsByOwner[uid];
+    });
+    rebuildRecordsArray();
+  }
+
+  function rebuildReportsArray() {
+    var flat = [];
+    Object.keys(reportsByOwner).forEach(function (ownerUid) {
+      var ownerReps = reportsByOwner[ownerUid] || {};
+      Object.keys(ownerReps).forEach(function (key) {
+        var r = ownerReps[key] || {};
+        flat.push({
+          key: key, ownerUid: ownerUid, receipt: r.receipt || "", issue: r.issue || "", result: r.result || "",
+          employeeName: r.employeeName || "", createdAt: r.createdAt || 0
+        });
+      });
+    });
+    flat.sort(function (a, b) { return b.createdAt - a.createdAt; });
+    reports = flat;
+    renderReportsList();
+  }
+
+  function syncReportListeners() {
+    if (isAdmin()) {
+      if (!adminReportsAttached) {
+        adminReportsAttached = true;
+        reportsRef.on("value", function (snapshot) {
+          reportsByOwner = snapshot.val() || {};
+          rebuildReportsArray();
+        });
+      }
+      return;
+    }
+    var accessible = computeSupervisedUids();
+    accessible[currentUser.uid] = true;
+    Object.keys(accessible).forEach(function (uid) {
+      if (reportListeners[uid]) return;
+      reportListeners[uid] = true;
+      reportsRef.child(uid).on("value", function (snapshot) {
+        reportsByOwner[uid] = snapshot.val() || {};
+        rebuildReportsArray();
+      });
+    });
+    Object.keys(reportListeners).forEach(function (uid) {
+      if (accessible[uid]) return;
+      reportsRef.child(uid).off();
+      delete reportListeners[uid];
+      delete reportsByOwner[uid];
+    });
+    rebuildReportsArray();
+  }
+
+  function rebuildPendingArray() {
+    var val = pendingRawVal || {};
+    var all = Object.keys(val).map(function (key) {
+      var p = val[key] || {};
+      return {
+        key: key, receipt: p.receipt || "", started: p.started || "", reason: p.reason || "",
+        done: !!p.done, ownerUid: p.ownerUid || "", employeeName: p.employeeName || "",
+        shareAll: !!p.shareAll, sharedWith: p.sharedWith || {}
+      };
+    });
+    all.sort(function (a, b) { return (b.started || "").localeCompare(a.started || ""); });
+    pendingItems = all.filter(function (p) {
+      return isAdmin() || p.ownerUid === currentUser.uid || p.shareAll ||
+        (p.sharedWith && p.sharedWith[currentUser.uid]) ||
+        (users[p.ownerUid] && users[p.ownerUid].supervisorUids && users[p.ownerUid].supervisorUids[currentUser.uid]);
+    });
+    renderPendingList();
+  }
+
+  function attachDataListeners() {
+    recordsRef.once("value").then(function (snap) {
+      var val = snap.val() || {};
+      var legacyKeys = Object.keys(val).filter(function (k) {
+        var v = val[k];
+        return v && typeof v === "object" && typeof v.name === "string" && typeof v.phone === "string";
+      });
+      if (legacyKeys.length && isAdmin()) {
+        var migrateUpdates = {};
+        legacyKeys.forEach(function (k) {
+          migrateUpdates[currentUser.uid + "/" + k] = val[k];
+          migrateUpdates[k] = null;
+        });
+        recordsRef.update(migrateUpdates).then(function () {
+          showToast("success", "تم استرجاع " + legacyKeys.length + " سجل قديم لحسابك ✅");
+        }).catch(function () {
+          showToast("warn", "تعذّر ترحيل بعض البيانات القديمة تلقائيًا — راجع قواعد الأمان");
+        });
+      } else if (!snap.exists() && !seeded) {
+        seeded = true;
+        var updates = {};
+        SEED_DATA.forEach(function (r) {
+          var newKey = recordsRef.child(currentUser.uid).push().key;
+          updates[currentUser.uid + "/" + newKey] = { name: r.name, phone: r.phone, address: r.address, stage: "جديد" };
+        });
+        recordsRef.update(updates);
+      }
+    });
+
+    syncRecordListeners();
+    syncReportListeners();
+
+    pendingRef.on("value", function (snapshot) {
+      pendingRawVal = snapshot.val() || {};
+      rebuildPendingArray();
+    });
 
     usersRef.on("value", function (snapshot) {
       users = snapshot.val() || {};
-      if (document.getElementById("usersModal").classList.contains("hidden") === false) renderUsersList();
+      if (!document.getElementById("usersModal").classList.contains("hidden")) renderUsersList();
+      syncRecordListeners();
+      syncReportListeners();
+      rebuildPendingArray();
+      renderShareCheckboxes();
     });
   }
 
   function findByKey(key) { for (var i = 0; i < records.length; i++) if (records[i].key === key) return records[i]; return null; }
-  function writeRecord(key, data) { return recordsRef.child(key).update(data); }
+  function findReportByKey(key) { for (var i = 0; i < reports.length; i++) if (reports[i].key === key) return reports[i]; return null; }
+  function writeRecord(ownerUid, key, data) { return recordsRef.child(ownerUid).child(key).update(data); }
 
   // ================= FILTERS / RENDER (records) =================
   function getRegions() {
@@ -674,15 +951,20 @@
     var visible = getVisibleRecords();
     var body = document.getElementById("tableBody");
     if (visible.length === 0) {
-      body.innerHTML = '<tr><td colspan="6" class="empty-state">لا توجد نتائج مطابقة</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="empty-state">لا توجد نتائج مطابقة</td></tr>';
     } else {
       body.innerHTML = visible.map(function (r) {
+        var enteredBy = (users[r.ownerUid] && (users[r.ownerUid].displayName || users[r.ownerUid].email)) || "—";
         return '<tr>' +
           '<td data-action="open-detail" data-key="' + r.key + '" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">' + escapeHtml(r.name) + '</td>' +
-          '<td style="font-variant-numeric: tabular-nums;">' + escapeHtml(r.phone) + '</td>' +
+          '<td style="font-variant-numeric: tabular-nums;">' +
+            '<span class="no-print">' + phoneCellHtml(r.phone) + '</span>' +
+            '<span class="print-only">' + escapeHtml(r.phone) + '</span>' +
+          '</td>' +
           '<td>' + escapeHtml(r.address) + '</td>' +
           '<td><select class="stage-select ' + stageClass(r.stage) + '" data-action="quick-stage" data-key="' + r.key + '">' + stageOptionsHtml(r.stage) + '</select></td>' +
           '<td>' + reminderChipHtml(r) + '</td>' +
+          '<td class="no-print" style="font-size:12.5px; color:#6B6B6B;">' + escapeHtml(enteredBy) + '</td>' +
           '<td class="no-print" style="white-space:nowrap;">' +
             '<button class="icon-btn" data-action="open-detail" data-key="' + r.key + '" title="تفاصيل">📋</button>' +
             '<button class="delete-btn" data-action="request-delete" data-key="' + r.key + '" title="حذف">' + (isAdmin() ? '🗑️' : '🔒') + '</button>' +
@@ -704,8 +986,8 @@
       dupAlert.classList.remove("hidden"); return;
     }
     dupAlert.classList.add("hidden");
-    var newKey = recordsRef.push().key;
-    recordsRef.child(newKey).set({ name: name, phone: phone, address: address, stage: "جديد" })
+    var newKey = recordsRef.child(currentUser.uid).push().key;
+    recordsRef.child(currentUser.uid).child(newKey).set({ name: name, phone: phone, address: address, stage: "جديد" })
       .then(function () {
         showToast("success", 'تمت إضافة "' + name + '" وحُفظت لكل الأجهزة');
         document.getElementById("inName").value = ""; document.getElementById("inPhone").value = ""; document.getElementById("inAddress").value = "";
@@ -748,7 +1030,9 @@
   document.getElementById("tableBody").addEventListener("change", function (e) {
     var el = e.target.closest('[data-action="quick-stage"]');
     if (!el) return;
-    writeRecord(el.getAttribute("data-key"), { stage: el.value })
+    var key = el.getAttribute("data-key");
+    var r = findByKey(key); if (!r) return;
+    writeRecord(r.ownerUid, key, { stage: el.value })
       .then(function () { showToast("success", "تم تحديث المرحلة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
   });
 
@@ -756,9 +1040,11 @@
   document.getElementById("deleteConfirm").addEventListener("click", function () {
     if (!deleteKey) return;
     var r = findByKey(deleteKey); var removedName = r ? r.name : "";
-    recordsRef.child(deleteKey).remove()
-      .then(function () { showToast("info", 'تم حذف "' + removedName + '" من كل الأجهزة'); })
-      .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+    if (r) {
+      recordsRef.child(r.ownerUid).child(deleteKey).remove()
+        .then(function () { showToast("info", 'تم حذف "' + removedName + '" من كل الأجهزة'); })
+        .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+    }
     deleteKey = null;
     document.getElementById("deleteModal").classList.add("hidden");
   });
@@ -772,6 +1058,9 @@
     document.getElementById("detailNameInput").value = r.name;
     document.getElementById("detailPhoneInput").value = r.phone;
     document.getElementById("detailAddressInput").value = r.address;
+    var firstPhone = phoneNumbers(r.phone)[0] || "";
+    document.getElementById("detailCallBtn").href = firstPhone ? telHref(firstPhone) : "#";
+    document.getElementById("detailWaBtn").href = firstPhone ? waHref(firstPhone) : "#";
     document.getElementById("detailNameInput").disabled = !isAdmin();
     document.getElementById("detailPhoneInput").disabled = !isAdmin();
     document.getElementById("detailAddressInput").disabled = !isAdmin();
@@ -800,25 +1089,28 @@
     if (!name || !phone || !address) { showToast("warn", "لا يمكن ترك خانة فارغة"); return; }
     var dup = records.filter(function (r) { return r.key !== currentDetailKey && normalize(r.name) === normalize(name); })[0];
     if (dup) { showToast("warn", 'الاسم "' + name + '" مستخدم مسبقًا لبيج آخر'); return; }
-    writeRecord(currentDetailKey, { name: name, phone: phone, address: address })
+    var cur = findByKey(currentDetailKey); if (!cur) return;
+    writeRecord(cur.ownerUid, currentDetailKey, { name: name, phone: phone, address: address })
       .then(function () { showToast("success", "تم حفظ التعديل لكل الأجهزة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
   });
   document.getElementById("detailStageSelect").addEventListener("change", function () {
     if (!currentDetailKey) return;
-    writeRecord(currentDetailKey, { stage: this.value }).then(function () { showToast("success", "تم تحديث المرحلة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+    var cur = findByKey(currentDetailKey); if (!cur) return;
+    writeRecord(cur.ownerUid, currentDetailKey, { stage: this.value }).then(function () { showToast("success", "تم تحديث المرحلة"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
   });
   document.getElementById("addNoteBtn").addEventListener("click", function () {
     var text = document.getElementById("newNoteText").value.trim();
     if (!text) { showToast("warn", "اكتب نص الملاحظة أولاً"); return; }
     if (!currentDetailKey) return;
     var key = currentDetailKey;
-    var noteRef = recordsRef.child(key).child("notes").push();
+    var cur = findByKey(key); if (!cur) return;
+    var noteRef = recordsRef.child(cur.ownerUid).child(key).child("notes").push();
     noteRef.set({ text: text, author: currentUser.displayName, ts: Date.now() })
       .then(function () {
         showToast("success", "تمت إضافة الملاحظة");
         document.getElementById("newNoteText").value = "";
         var r = findByKey(key);
-        if (r && r.stage === "جديد") writeRecord(key, { stage: "تم التواصل" });
+        if (r && r.stage === "جديد") writeRecord(r.ownerUid, key, { stage: "تم التواصل" });
       }).catch(function () { showToast("warn", "⚠️ فشل حفظ الملاحظة"); });
   });
   document.getElementById("setReminderBtn").addEventListener("click", function () {
@@ -826,12 +1118,14 @@
     var note = document.getElementById("reminderNoteInput").value.trim();
     if (!date) { showToast("warn", "اختر تاريخ المتابعة أولاً"); return; }
     if (!currentDetailKey) return;
-    writeRecord(currentDetailKey, { reminderDate: date, reminderNote: note })
+    var cur = findByKey(currentDetailKey); if (!cur) return;
+    writeRecord(cur.ownerUid, currentDetailKey, { reminderDate: date, reminderNote: note })
       .then(function () { showToast("success", "تم تعيين التذكير"); }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
   });
   document.getElementById("clearReminderBtn").addEventListener("click", function () {
     if (!currentDetailKey) return;
-    writeRecord(currentDetailKey, { reminderDate: null, reminderNote: "" })
+    var cur = findByKey(currentDetailKey); if (!cur) return;
+    writeRecord(cur.ownerUid, currentDetailKey, { reminderDate: null, reminderNote: "" })
       .then(function () {
         showToast("info", "تمت إزالة التذكير");
         document.getElementById("reminderDateInput").value = ""; document.getElementById("reminderNoteInput").value = "";
@@ -840,7 +1134,8 @@
 
   // ================= USERS ADMIN =================
   document.getElementById("usersBtn").addEventListener("click", function () {
-    if (!requireAdmin()) return;
+    if (!canManageUsers()) { showToast("warn", "🔒 هذا الإجراء يحتاج صلاحية إدارة المستخدمين"); return; }
+    document.getElementById("newUserManageWrap").classList.toggle("hidden", !isAdmin());
     renderUsersList();
     document.getElementById("usersModal").classList.remove("hidden");
   });
@@ -853,24 +1148,39 @@
     wrap.innerHTML = uids.map(function (uid) {
       var u = users[uid];
       var isMe = uid === currentUser.uid;
+      var targetIsAdmin = u.role === "admin";
+      var canEditThis = isMe || isAdmin() || (canManageUsers() && !targetIsAdmin);
+      var canModerate = !isMe && (isAdmin() || (canManageUsers() && !targetIsAdmin));
+      var canTogglePerm = isAdmin() && !isMe && !targetIsAdmin;
       var initial = (u.displayName || u.email || "?").trim().charAt(0).toUpperCase();
-      return '<div class="user-row">' +
+      var actions = "";
+      if (canEditThis) actions += '<button class="tiny-btn" data-action="rename-user" data-uid="' + uid + '">✏️ الاسم</button>';
+      if (canModerate) actions += '<button class="tiny-btn warn" data-action="toggle-disable" data-uid="' + uid + '">' + (u.disabled ? "✅ تفعيل" : "⛔ تعطيل") + '</button>';
+      if (canTogglePerm) actions += '<button class="tiny-btn" data-action="toggle-manage-perm" data-uid="' + uid + '">' + (u.canManageUsers ? "🔒 سحب صلاحية الإدارة" : "🔑 منح صلاحية الإدارة") + '</button>';
+      if (canModerate) actions += '<button class="tiny-btn danger" data-action="delete-user" data-uid="' + uid + '">🗑️ حذف</button>';
+      var supHtml = "";
+      if (isAdmin() && !targetIsAdmin) {
+        var chips = Object.keys(u.supervisorUids || {}).map(function (supUid) {
+          var supU = users[supUid];
+          var supName = supU ? (supU.displayName || supU.email) : "؟";
+          return '<span class="sup-chip">' + escapeHtml(supName) + ' <button data-action="remove-supervisor" data-uid="' + uid + '" data-sup="' + supUid + '" title="إزالة">×</button></span>';
+        }).join("");
+        supHtml = '<div class="user-supervisors">👨‍💼 يشرف عليه: ' + (chips || '<span style="color:#B0AA98;">لا أحد</span>') +
+          ' <button class="tiny-btn" data-action="add-supervisor" data-uid="' + uid + '">+ إضافة مشرف</button></div>';
+      }
+      return '<div class="user-row" style="flex-wrap:wrap;">' +
         '<div class="user-avatar">' + escapeHtml(initial) + '</div>' +
         '<div class="user-info">' +
           '<div class="user-name-line">' +
             '<span class="uname-text" data-uid="' + uid + '">' + escapeHtml(u.displayName || "") + '</span>' +
             (u.role === "admin" ? '<span class="role-badge">مسؤول</span>' : '') +
+            (u.canManageUsers && !targetIsAdmin ? '<span class="role-badge" style="background:#E3EEF7; color:#1F4E78;">إدارة مستخدمين</span>' : '') +
             (u.disabled ? '<span class="disabled-badge">معطّل</span>' : '') +
           '</div>' +
           '<div class="user-email-line">' + escapeHtml(u.email || "") + (isMe ? " (أنت)" : "") + '</div>' +
+          supHtml +
         '</div>' +
-        '<div class="user-actions">' +
-          (isMe ? '' :
-            '<button class="tiny-btn" data-action="rename-user" data-uid="' + uid + '">✏️ الاسم</button>' +
-            '<button class="tiny-btn warn" data-action="toggle-disable" data-uid="' + uid + '">' + (u.disabled ? "✅ تفعيل" : "⛔ تعطيل") + '</button>' +
-            '<button class="tiny-btn danger" data-action="delete-user" data-uid="' + uid + '">🗑️ حذف</button>'
-          ) +
-        '</div></div>';
+        '<div class="user-actions">' + actions + '</div></div>';
     }).join("");
   }
 
@@ -881,24 +1191,62 @@
     var action = btn.getAttribute("data-action");
     var u = users[uid];
     if (!u) return;
+    var isMe = uid === currentUser.uid;
+    var targetIsAdmin = u.role === "admin";
+    var canModerate = !isMe && (isAdmin() || (canManageUsers() && !targetIsAdmin));
+    var canEditThis = isMe || isAdmin() || (canManageUsers() && !targetIsAdmin);
 
     if (action === "toggle-disable") {
+      if (!canModerate) { showToast("warn", "🔒 صلاحياتك لا تسمح بهذا الإجراء"); return; }
       usersRef.child(uid).update({ disabled: !u.disabled })
         .then(function () { showToast("success", u.disabled ? "تم تفعيل الحساب" : "تم تعطيل الحساب"); })
         .catch(function () { showToast("warn", "⚠️ فشل التنفيذ"); });
     } else if (action === "delete-user") {
+      if (!canModerate) { showToast("warn", "🔒 صلاحياتك لا تسمح بهذا الإجراء"); return; }
       if (!confirm('حذف وصول "' + (u.displayName || u.email) + '" نهائيًا؟ (لن يقدر يدخل الموقع بعدها)')) return;
       usersRef.child(uid).remove()
         .then(function () { showToast("info", "تم حذف وصول المستخدم"); })
         .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
     } else if (action === "rename-user") {
+      if (!canEditThis) { showToast("warn", "🔒 صلاحياتك لا تسمح بهذا الإجراء"); return; }
       var newName = prompt("الاسم الجديد:", u.displayName || "");
       if (newName === null) return;
       newName = newName.trim();
       if (!newName) { showToast("warn", "الاسم لا يمكن أن يكون فارغًا"); return; }
       usersRef.child(uid).update({ displayName: newName })
-        .then(function () { showToast("success", "تم تحديث الاسم"); })
+        .then(function () {
+          showToast("success", "تم تحديث الاسم");
+          if (isMe) {
+            currentUser.displayName = newName;
+            document.getElementById("whoChip").textContent = "👤 " + currentUser.displayName + (isAdmin() ? " (مسؤول)" : "");
+          }
+        })
         .catch(function () { showToast("warn", "⚠️ فشل التحديث"); });
+    } else if (action === "toggle-manage-perm") {
+      if (!isAdmin() || isMe || targetIsAdmin) { showToast("warn", "🔒 صلاحياتك لا تسمح بهذا الإجراء"); return; }
+      usersRef.child(uid).update({ canManageUsers: !u.canManageUsers })
+        .then(function () { showToast("success", !u.canManageUsers ? "تم منح صلاحية إدارة المستخدمين" : "تم سحب صلاحية إدارة المستخدمين"); })
+        .catch(function () { showToast("warn", "⚠️ فشل التنفيذ"); });
+    } else if (action === "add-supervisor") {
+      if (!isAdmin() || targetIsAdmin) { showToast("warn", "🔒 هذا الإجراء للمسؤول فقط"); return; }
+      var candidates = Object.keys(users).filter(function (cuid) {
+        return cuid !== uid && (users[cuid].role === "admin" || users[cuid].canManageUsers) && !(u.supervisorUids && u.supervisorUids[cuid]);
+      });
+      if (!candidates.length) { showToast("warn", "لا يوجد حساب مؤهل كمشرف حاليًا — امنح شخصًا صلاحية إدارة المستخدمين أولاً"); return; }
+      var listText = candidates.map(function (cuid, i) { return (i + 1) + ") " + (users[cuid].displayName || users[cuid].email); }).join("\n");
+      var pick = prompt('اختر رقم الشخص لجعله مشرفًا على "' + (u.displayName || u.email) + '":\n' + listText);
+      if (pick === null) return;
+      var idx = parseInt(pick, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= candidates.length) { showToast("warn", "اختيار غير صحيح"); return; }
+      usersRef.child(uid).child("supervisorUids").child(candidates[idx]).set(true)
+        .then(function () { showToast("success", "تمت إضافة المشرف"); })
+        .catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+    } else if (action === "remove-supervisor") {
+      if (!isAdmin()) { showToast("warn", "🔒 هذا الإجراء للمسؤول فقط"); return; }
+      var supUidToRemove = btn.getAttribute("data-sup");
+      usersRef.child(uid).child("supervisorUids").child(supUidToRemove).remove()
+        .then(function () { showToast("info", "تمت إزالة المشرف"); })
+        .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
     }
   });
 
@@ -917,10 +1265,12 @@
         firebase.initializeApp(FIREBASE_CONFIG, "Secondary");
     } catch (e) { msg.textContent = "خطأ إعداد — حاول تحديث الصفحة"; return; }
 
+    var canManage = isAdmin() && document.getElementById("newUserCanManage").checked;
+
     secondaryApp.auth().createUserWithEmailAndPassword(email, pass)
       .then(function (cred) {
         var newUid = cred.user.uid;
-        return usersRef.child(newUid).set({ email: email, displayName: name, role: "member", disabled: false, createdAt: Date.now() })
+        return usersRef.child(newUid).set({ email: email, displayName: name, role: "member", disabled: false, canManageUsers: canManage, createdAt: Date.now() })
           .then(function () { return secondaryApp.auth().signOut(); });
       })
       .then(function () {
@@ -929,6 +1279,7 @@
         document.getElementById("newUserName").value = "";
         document.getElementById("newUserEmail").value = "";
         document.getElementById("newUserPassword").value = "";
+        document.getElementById("newUserCanManage").checked = false;
       })
       .catch(function (e) {
         var code = e && e.code ? e.code : "";
@@ -938,20 +1289,194 @@
       });
   });
 
+  // ================= DAILY REPORTS =================
+  document.getElementById("reportsBtn").addEventListener("click", function () {
+    renderReportsList();
+    document.getElementById("reportsModal").classList.remove("hidden");
+  });
+  document.getElementById("reportsClose").addEventListener("click", function () { document.getElementById("reportsModal").classList.add("hidden"); });
+
+  document.getElementById("addReportBtn").addEventListener("click", function () {
+    var receipt = document.getElementById("repReceipt").value.trim();
+    var issue = document.getElementById("repIssue").value.trim();
+    var result = document.getElementById("repResult").value.trim();
+    if (!receipt || !issue || !result) { showToast("warn", "الرجاء تعبئة كل خانات التقرير"); return; }
+    var newKey = reportsRef.child(currentUser.uid).push().key;
+    reportsRef.child(currentUser.uid).child(newKey).set({
+      receipt: receipt, issue: issue, result: result,
+      employeeName: currentUser.displayName, createdAt: Date.now()
+    }).then(function () {
+      showToast("success", "تمت إضافة التقرير");
+      document.getElementById("repReceipt").value = "";
+      document.getElementById("repIssue").value = "";
+      document.getElementById("repResult").value = "";
+    }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+
+  function renderReportsList() {
+    var wrap = document.getElementById("reportsList");
+    if (!wrap) return;
+    if (!reports.length) { wrap.innerHTML = '<div style="font-size:13px; color:#9A9A9A;">لا توجد تقارير بعد</div>'; return; }
+    var rows = reports.map(function (r) {
+      var d = r.createdAt ? new Date(r.createdAt).toLocaleString("ar-IQ", { dateStyle: "medium", timeStyle: "short" }) : "";
+      var canDelete = isAdmin() || r.ownerUid === currentUser.uid;
+      return '<tr>' +
+        '<td>' + escapeHtml(r.receipt) + '</td>' +
+        '<td>' + escapeHtml(r.issue) + '</td>' +
+        '<td>' + escapeHtml(r.result) + '</td>' +
+        '<td>' + escapeHtml(r.employeeName) + '</td>' +
+        '<td style="white-space:nowrap;">' + d + '</td>' +
+        '<td>' + (canDelete ? '<button class="delete-btn" data-action="delete-report" data-key="' + r.key + '" title="حذف">🗑️</button>' : '') + '</td>' +
+      '</tr>';
+    }).join("");
+    wrap.innerHTML = '<table class="mini-table"><thead><tr><th>رقم الوصل/العميل</th><th>مشكلة الطلب</th><th>النتيجة</th><th>الموظف</th><th>التاريخ</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  document.getElementById("reportsList").addEventListener("click", function (e) {
+    var el = e.target.closest('[data-action="delete-report"]');
+    if (!el) return;
+    var key = el.getAttribute("data-key");
+    var r = findReportByKey(key); if (!r) return;
+    if (!(isAdmin() || r.ownerUid === currentUser.uid)) { showToast("warn", "🔒 صلاحياتك لا تسمح بهذا الإجراء"); return; }
+    if (!confirm("حذف هذا التقرير نهائيًا؟")) return;
+    reportsRef.child(r.ownerUid).child(key).remove()
+      .then(function () { showToast("info", "تم حذف التقرير"); })
+      .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+  });
+
+  document.getElementById("exportReportsPdfBtn").addEventListener("click", function () {
+    if (!reports.length) { showToast("warn", "لا توجد تقارير لتصديرها"); return; }
+    var rows = reports.map(function (r) {
+      var d = r.createdAt ? new Date(r.createdAt).toLocaleString("ar-IQ", { dateStyle: "medium", timeStyle: "short" }) : "";
+      return '<tr><td>' + escapeHtml(r.employeeName) + '</td><td>' + escapeHtml(r.receipt) + '</td><td>' + escapeHtml(r.issue) + '</td><td>' + escapeHtml(r.result) + '</td><td>' + d + '</td></tr>';
+    }).join("");
+    var html = '<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>التقارير اليومية</title>' +
+      '<style>body{font-family:Tahoma,Arial,sans-serif;padding:20px;color:#222;} h2{color:#1F4E78;} table{width:100%;border-collapse:collapse;margin-top:10px;} th,td{border:1px solid #999;padding:6px 8px;font-size:13px;text-align:right;} th{background:#1F4E78;color:#fff;}</style>' +
+      '</head><body><h2>التقارير اليومية</h2><div>تاريخ التصدير: ' + new Date().toLocaleDateString("ar-IQ") + '</div>' +
+      '<table><thead><tr><th>الموظف</th><th>رقم الوصل/العميل</th><th>مشكلة الطلب</th><th>النتيجة</th><th>التاريخ</th></tr></thead><tbody>' + rows + '</tbody></table></body></html>';
+    var w = window.open("", "_blank");
+    if (!w) { showToast("warn", "يرجى السماح بالنوافذ المنبثقة (Popups) لهذا الموقع للتصدير"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(function () { w.print(); }, 350);
+  });
+
+  // ================= PENDING ITEMS (المتعلقات) =================
+  document.getElementById("pendingBtn").addEventListener("click", function () {
+    renderShareCheckboxes();
+    renderPendingList();
+    document.getElementById("pendingModal").classList.remove("hidden");
+  });
+  document.getElementById("pendingClose").addEventListener("click", function () { document.getElementById("pendingModal").classList.add("hidden"); });
+
+  function renderShareCheckboxes() {
+    var wrap = document.getElementById("pendShareList");
+    if (!wrap || !currentUser) return;
+    var others = Object.keys(users).filter(function (uid) { return uid !== currentUser.uid && !users[uid].disabled; });
+    if (!others.length) { wrap.innerHTML = '<span style="font-size:12px; color:#9A9A9A;">لا يوجد زملاء آخرون بعد</span>'; return; }
+    wrap.innerHTML = others.map(function (uid) {
+      var u = users[uid];
+      return '<label class="share-chip"><input type="checkbox" class="pend-share-cb" value="' + uid + '" style="width:auto;" /> ' + escapeHtml(u.displayName || u.email) + '</label>';
+    }).join("");
+  }
+  document.getElementById("pendShareAll").addEventListener("change", function () {
+    document.getElementById("pendShareListWrap").classList.toggle("hidden", this.checked);
+  });
+
+  document.getElementById("addPendingBtn").addEventListener("click", function () {
+    var receipt = document.getElementById("pendReceipt").value.trim();
+    var started = document.getElementById("pendStarted").value;
+    var reason = document.getElementById("pendReason").value.trim();
+    if (!receipt || !started) { showToast("warn", "الرجاء إدخال رقم الوصل وتاريخ بدء المعالجة"); return; }
+    var shareAll = document.getElementById("pendShareAll").checked;
+    var sharedWith = {};
+    if (!shareAll) {
+      document.querySelectorAll(".pend-share-cb:checked").forEach(function (cb) { sharedWith[cb.value] = true; });
+    }
+    var newKey = pendingRef.push().key;
+    pendingRef.child(newKey).set({
+      receipt: receipt, started: started, reason: reason, done: false,
+      ownerUid: currentUser.uid, employeeName: currentUser.displayName,
+      shareAll: shareAll, sharedWith: sharedWith
+    }).then(function () {
+      showToast("success", "تمت إضافة المتعلق");
+      document.getElementById("pendReceipt").value = "";
+      document.getElementById("pendStarted").value = "";
+      document.getElementById("pendReason").value = "";
+      document.getElementById("pendShareAll").checked = false;
+      document.getElementById("pendShareListWrap").classList.remove("hidden");
+      document.querySelectorAll(".pend-share-cb").forEach(function (cb) { cb.checked = false; });
+    }).catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+
+  function renderPendingList() {
+    var wrap = document.getElementById("pendingList");
+    if (!wrap) return;
+    if (!pendingItems.length) { wrap.innerHTML = '<div style="font-size:13px; color:#9A9A9A;">لا توجد متعلقات حاليًا</div>'; return; }
+    var rows = pendingItems.map(function (p) {
+      var canEdit = isAdmin() || p.ownerUid === currentUser.uid || p.shareAll || (p.sharedWith && p.sharedWith[currentUser.uid]) ||
+        (users[p.ownerUid] && users[p.ownerUid].supervisorUids && users[p.ownerUid].supervisorUids[currentUser.uid]);
+      var canDelete = isAdmin() || p.ownerUid === currentUser.uid;
+      var startedLabel = p.started ? new Date(p.started).toLocaleString("ar-IQ", { dateStyle: "medium", timeStyle: "short" }) : "";
+      return '<tr>' +
+        '<td>' + escapeHtml(p.receipt) + '</td>' +
+        '<td style="white-space:nowrap;">' + startedLabel + '</td>' +
+        '<td>' + (canEdit ? '<input type="checkbox" class="pend-done-cb" data-key="' + p.key + '" ' + (p.done ? "checked" : "") + ' />' : (p.done ? "✅" : "⏳")) + '</td>' +
+        '<td>' + escapeHtml(p.reason) + '</td>' +
+        '<td>' + escapeHtml(p.employeeName) + '</td>' +
+        '<td>' + (canDelete ? '<button class="delete-btn" data-action="delete-pending" data-key="' + p.key + '" title="حذف">🗑️</button>' : '') + '</td>' +
+      '</tr>';
+    }).join("");
+    wrap.innerHTML = '<table class="mini-table"><thead><tr><th>رقم الوصل</th><th>بدء المعالجة</th><th>تمت المعالجة؟</th><th>السبب</th><th>الموظف</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  document.getElementById("pendingList").addEventListener("change", function (e) {
+    var el = e.target.closest(".pend-done-cb");
+    if (!el) return;
+    pendingRef.child(el.getAttribute("data-key")).update({ done: el.checked })
+      .then(function () { showToast("success", el.checked ? "تم وضع علامة: تمت المعالجة" : "تم إلغاء علامة الإنجاز"); })
+      .catch(function () { showToast("warn", "⚠️ فشل الحفظ"); });
+  });
+  document.getElementById("pendingList").addEventListener("click", function (e) {
+    var el = e.target.closest('[data-action="delete-pending"]');
+    if (!el) return;
+    var key = el.getAttribute("data-key");
+    if (!confirm("حذف هذا المتعلق نهائيًا؟")) return;
+    pendingRef.child(key).remove()
+      .then(function () { showToast("info", "تم الحذف"); })
+      .catch(function () { showToast("warn", "⚠️ فشل الحذف"); });
+  });
+
+  document.getElementById("exportPendingExcelBtn").addEventListener("click", function () {
+    try {
+      if (!pendingItems.length) { showToast("warn", "لا توجد متعلقات لتصديرها"); return; }
+      var rows = pendingItems.map(function (p) {
+        return {
+          "رقم الوصل": p.receipt, "بدء المعالجة": p.started ? new Date(p.started).toLocaleString("ar-IQ") : "",
+          "تمت المعالجة": p.done ? "نعم" : "لا", "السبب": p.reason, "الموظف": p.employeeName
+        };
+      });
+      var ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [{ wch: 16 }, { wch: 22 }, { wch: 14 }, { wch: 30 }, { wch: 18 }];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "المتعلقات");
+      XLSX.writeFile(wb, "المتعلقات.xlsx");
+      showToast("success", "تم تصدير الملف بنجاح");
+    } catch (e) { showToast("warn", "تعذّر التصدير — حاول مرة أخرى"); }
+  });
+
   // ================= EXPORTS =================
   document.getElementById("exportExcelBtn").addEventListener("click", function () {
     try {
       var sorted = records.slice().sort(function (a, b) { return (a.address || "").localeCompare(b.address || "", "ar"); });
       var rows = sorted.map(function (r) {
         var lastNote = r.notes && r.notes.length ? r.notes[0].text : "";
+        var enteredBy = (users[r.ownerUid] && (users[r.ownerUid].displayName || users[r.ownerUid].email)) || "";
         return {
           "البيج": r.name, "رقم الهاتف": r.phone, "العنوان": r.address, "المرحلة": r.stage,
           "تاريخ المتابعة القادمة": r.reminderDate || "", "ملاحظة المتابعة": r.reminderNote || "",
-          "عدد الملاحظات": r.notes ? r.notes.length : 0, "آخر ملاحظة": lastNote
+          "عدد الملاحظات": r.notes ? r.notes.length : 0, "آخر ملاحظة": lastNote, "المدخل": enteredBy
         };
       });
       var ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [{ wch: 28 }, { wch: 20 }, { wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 30 }];
+      ws["!cols"] = [{ wch: 28 }, { wch: 20 }, { wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 30 }, { wch: 18 }];
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "البيانات");
       XLSX.writeFile(wb, "سجل_CRM.xlsx");
@@ -959,6 +1484,16 @@
     } catch (e) { showToast("warn", "تعذّر التصدير — حاول مرة أخرى"); }
   });
   document.getElementById("exportPdfBtn").addEventListener("click", function () { try { window.print(); } catch (e) {} });
+
+  // ================= CLICK OUTSIDE TO CLOSE MODALS =================
+  document.querySelectorAll(".modal-overlay").forEach(function (overlay) {
+    overlay.addEventListener("mousedown", function (e) {
+      if (e.target !== overlay) return;
+      overlay.classList.add("hidden");
+      if (overlay.id === "detailModal") currentDetailKey = null;
+      if (overlay.id === "deleteModal") deleteKey = null;
+    });
+  });
 
   // ================= INIT =================
   initAuth();
